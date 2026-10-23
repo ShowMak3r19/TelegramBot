@@ -1,0 +1,718 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TelegramBot 控制台</title>
+    <meta name="application-name" content="TelegramBot" />
+    <meta name="apple-mobile-web-app-title" content="TelegramBot" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="theme-color" content="#008ee8" />
+    <link rel="icon" href="/assets/telegrambot-logo.svg" type="image/svg+xml" />
+    <link rel="icon" href="/assets/favicon-32.png" sizes="32x32" type="image/png" />
+    <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" sizes="180x180" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark"><img src="/assets/telegrambot-logo.svg" alt="" /></span>
+        <div>
+          <strong>TelegramBot</strong>
+          <small>NAS 控制台</small>
+        </div>
+      </div>
+      <nav class="side-nav">
+        <button class="nav-item active" data-view="dashboard"><span class="nav-ico" data-icon="dashboard"></span><span>仪表盘</span></button>
+        <div class="nav-group expanded" data-group="modules">
+          <button class="nav-item nav-parent" data-view="modules">
+            <span class="nav-ico" data-icon="modules"></span><span>功能模块</span><span class="chevron" data-icon="chevronUp" title="展开/收起"></span>
+          </button>
+          <div class="sub-nav">
+            <button class="sub-nav-item" data-view="moduleRedPacket"><span class="nav-ico" data-icon="red_packet"></span><span>自动抢红包</span></button>
+            <button class="sub-nav-item" data-view="moduleSendRedPacket"><span class="nav-ico" data-icon="send_red_packet"></span><span>发红包</span></button>
+            <button class="sub-nav-item" data-view="moduleAiReply"><span class="nav-ico" data-icon="ai_reply"></span><span>AI 自动回复</span></button>
+            <button class="sub-nav-item" data-view="moduleUserProfile"><span class="nav-ico" data-icon="user_profile"></span><span>群友画像</span></button>
+            <button class="sub-nav-item" data-view="moduleAiImage"><span class="nav-ico" data-icon="ai_image"></span><span>AI 生图</span></button>
+            <button class="sub-nav-item" data-view="moduleAiDecrypt"><span class="nav-ico" data-icon="ai_decrypt"></span><span>AI 解密</span></button>
+            <button class="sub-nav-item" data-view="moduleGif"><span class="nav-ico" data-icon="gif"></span><span>GIF动图</span></button>
+            <button class="sub-nav-item" data-view="moduleWordCloud"><span class="nav-ico" data-icon="word_cloud"></span><span>词云</span></button>
+            <button class="sub-nav-item" data-view="moduleCheckin"><span class="nav-ico" data-icon="checkin"></span><span>自动签到</span></button>
+            <button class="sub-nav-item" data-view="moduleAutoForward"><span class="nav-ico" data-icon="auto_forward"></span><span>自动转发</span></button>
+            <button class="sub-nav-item" data-view="moduleMagnetImport"><span class="nav-ico" data-icon="magnet_import"></span><span>磁力数据导入</span></button>
+            <button class="sub-nav-item" data-view="moduleQuote"><span class="nav-ico" data-icon="quote"></span><span>语录贴纸</span></button>
+            <button class="sub-nav-item" data-view="moduleChatGames"><span class="nav-ico" data-icon="chat_games"></span><span>聊天小游戏</span></button>
+          </div>
+        </div>
+        <div class="nav-group" data-group="ai">
+          <button class="nav-item nav-parent" data-view="aiServices">
+            <span class="nav-ico" data-icon="aiServices"></span><span>AI 服务</span><span class="chevron" data-icon="chevronDown" title="展开/收起"></span>
+          </button>
+          <div class="sub-nav">
+            <button class="sub-nav-item" data-view="aiServices"><span class="nav-ico" data-icon="aiServices"></span><span>服务配置</span></button>
+            <button class="sub-nav-item" data-view="aiUsage"><span class="nav-ico" data-icon="aiUsage"></span><span>用量统计</span></button>
+          </div>
+        </div>
+        <button class="nav-item" data-view="logs"><span class="nav-ico" data-icon="logs"></span><span>日志</span></button>
+        <button class="nav-item" data-view="settings"><span class="nav-ico" data-icon="settings"></span><span>系统设置</span></button>
+      </nav>
+    </aside>
+
+    <main class="shell">
+      <header class="topbar">
+        <div class="title-row">
+          <span id="pageIcon" class="title-icon" data-icon="dashboard"></span>
+          <div>
+            <h1 id="pageTitle">仪表盘</h1>
+            <p id="pageSubtitle">系统概览 · 实时监控</p>
+          </div>
+        </div>
+        <div class="top-actions">
+          <span id="serviceState" class="status-pill">启动中</span>
+          <div id="serviceMenu" class="service-menu">
+            <button id="serviceMenuToggle" class="service-menu-toggle" type="button" aria-expanded="false">
+              <span>服务控制</span>
+              <span class="menu-caret" data-icon="chevronDown"></span>
+            </button>
+            <div class="service-menu-panel" role="menu">
+              <button data-service-action="start" role="menuitem">启动</button>
+              <button data-service-action="stop" role="menuitem">停止</button>
+              <button data-service-action="restart" class="primary" role="menuitem">重启</button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <section id="dashboard" class="view active">
+        <div class="dashboard-grid">
+          <section class="panel device-panel">
+            <div class="panel-head">
+              <h2><span>▦</span>设备信息</h2>
+            </div>
+            <dl id="deviceInfo" class="kv lines"></dl>
+          </section>
+
+          <section class="panel hardware-panel">
+            <div class="panel-head">
+              <h2><span>▣</span>硬件信息</h2>
+            </div>
+            <dl id="hardwareInfo" class="kv lines"></dl>
+            <div class="meter"><span id="diskMeter"></span></div>
+          </section>
+
+          <section class="panel resource-panel">
+            <div class="panel-head">
+              <h2><span>⌁</span>资源使用趋势</h2>
+              <div class="chart-legend">
+                <span>CPU <b id="cpuLegend">0%</b></span>
+                <span>内存 <b id="memoryLegend">0%</b></span>
+              </div>
+            </div>
+            <canvas id="resourceChart" height="210"></canvas>
+            <div class="range-tabs">
+              <button class="chip active" data-chart-window="15m">15 分钟</button>
+              <button class="chip" data-chart-window="30m">30 分钟</button>
+              <button class="chip" data-chart-window="1h">1 小时</button>
+              <button class="chip" data-chart-window="2h">2 小时</button>
+              <button class="chip" data-chart-window="all">全部</button>
+            </div>
+          </section>
+
+          <section class="panel speed-panel">
+            <div class="panel-head">
+              <h2><span>⌁</span>实时速率</h2>
+              <div class="chart-legend">
+                <span>下载 <b id="downloadLegend">0 B/s</b></span>
+                <span>上传 <b id="uploadLegend">0 B/s</b></span>
+              </div>
+            </div>
+            <canvas id="speedChart" height="250"></canvas>
+          </section>
+
+          <section class="panel stats-panel">
+            <div class="panel-head">
+              <h2><span>▥</span>统计信息</h2>
+            </div>
+            <dl id="statsInfo" class="kv stat-lines"></dl>
+          </section>
+        </div>
+      </section>
+
+      <section id="modules" class="view">
+        <div id="moduleCards" class="module-grid"></div>
+      </section>
+
+      <section id="moduleRedPacket" class="view">
+        <section id="moduleRedPacketConfig" class="panel detail-panel"></section>
+      </section>
+
+      <section id="moduleSendRedPacket" class="view">
+        <section class="panel ai-config-panel">
+          <div class="panel-head">
+            <div>
+              <h2>发红包</h2>
+              <p class="hint">这里管理发红包模板。当前第一种是拼手气口令红包，后续可以继续增加完全不同类型的红包玩法。</p>
+            </div>
+            <button id="addSendRedPacketTemplate">新增模板</button>
+          </div>
+          <form id="sendRedPacketSettingsForm" class="setting-form ai-setting-form">
+            <label><span>红包 ID 长度</span><input name="id_length" type="number" min="4" max="12" step="1"></label>
+            <label><span>最大同时红包</span><input name="max_active_packets" type="number" min="1" max="200" step="1"></label>
+            <label><span>普通群单包下限</span><input name="min_packet_amount" type="number" min="2" max="1000000" step="1"></label>
+            <label><span>严格群单包下限</span><input name="strict_min_packet_amount" type="number" min="2" max="1000000" step="1"></label>
+            <label class="wide-field"><span>严格下限群 ID</span><textarea name="strict_min_packet_group_ids" rows="3" placeholder="-1000000000001"></textarea></label>
+            <label class="wide-field"><span>状态文件</span><input name="state_store" type="text" placeholder="runtime/data/send_red_packet_state.json"></label>
+          </form>
+          <div id="sendRedPacketTemplates" class="template-list"></div>
+          <div class="gif-help">
+            <span class="tag">例：红包 10000 10 哈哈哈</span>
+            <span class="tag">例：/红包 10000 10 /start</span>
+            <span class="tag">自己发的红包不会被自动抢红包领取</span>
+          </div>
+          <div class="ai-save-panel inline-save">
+            <button id="saveSendRedPacketConfig" class="primary">保存发红包配置</button>
+            <span id="sendRedPacketSaveState" class="hint">保存后新的发红包请求会实时使用新配置。</span>
+          </div>
+        </section>
+      </section>
+
+      <section id="moduleAiReply" class="view">
+        <section class="panel ai-config-panel">
+          <div class="panel-head">
+            <div>
+              <h2>AI 自动回复</h2>
+              <p class="hint">触发词、上下文、模型参数分别配置；保存后新请求实时生效。</p>
+            </div>
+          </div>
+          <form id="replySettingsForm" class="setting-form ai-setting-form">
+            <label class="wide-field"><span>系统提示词</span><textarea name="system_prompt" rows="3"></textarea></label>
+            <label><span>命令前缀</span><textarea name="command_prefixes" rows="3" placeholder="/ai&#10;.ai"></textarea></label>
+            <label><span>唤醒词</span><textarea name="wake_words" rows="3" placeholder="@ai&#10;喂AI&#10;问AI"></textarea></label>
+            <label><span>回复触发词</span><textarea name="reply_triggers" rows="3" placeholder="ai&#10;回答&#10;解释"></textarea></label>
+            <label><span>上下文条数</span><input name="context_limit" type="number" min="0" step="1"></label>
+            <label><span>超时秒数</span><input name="timeout_seconds" type="number" min="5" step="1"></label>
+            <label><span>最大 Tokens</span><input name="max_tokens" type="number" min="256" step="256"></label>
+            <label><span>Temperature</span><input name="temperature" type="number" min="0" max="2" step="0.1"></label>
+            <label><span>Reasoning</span><select name="reasoning_effort"><option value="none">none</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option></select></label>
+            <label><span>文本详略</span><select name="text_verbosity"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label>
+            <label><span>图片细节</span><select name="image_detail"><option value="low">low</option><option value="high">high</option><option value="auto">auto</option><option value="original">original</option></select></label>
+            <label class="inline-setting"><span>联网搜索</span><input name="web_search" type="checkbox"></label>
+            <label class="inline-setting"><span>思考摘要</span><input name="reasoning_summary" type="checkbox"></label>
+            <label class="inline-setting"><span>/msg 信息查看</span><input name="message_info_enabled" type="checkbox"></label>
+            <label><span>/msg 命令</span><textarea name="message_info_command_prefixes" rows="2" placeholder="/msg"></textarea></label>
+            <label><span>设置文件</span><input name="settings_store" type="text" placeholder="runtime/data/ai_settings.json"></label>
+          </form>
+          <div class="ai-save-panel inline-save">
+            <button id="saveAiReplyConfig" class="primary">保存自动回复配置</button>
+            <span id="aiSaveState" class="hint">修改只影响新请求，已发出的请求不会被中断。</span>
+          </div>
+        </section>
+      </section>
+
+      <section id="moduleUserProfile" class="view">
+        <section class="panel ai-config-panel profile-config-panel">
+          <div class="panel-head">
+            <div>
+              <h2>群友画像</h2>
+              <p class="hint">抽取当前群中指定用户的近期或全部已归档发言，生成带原消息论据的 Telegram 富文本人设速写。</p>
+            </div>
+            <button id="saveUserProfileConfig" class="primary">保存画像配置</button>
+          </div>
+          <div class="profile-process" aria-label="用户画像生成流程">
+            <div><strong>01</strong><span>定位群友</span><small>回复消息或 @username</small></div>
+            <div><strong>02</strong><span>抽取样本</span><small>近期样本或数据库全量文字</small></div>
+            <div><strong>03</strong><span>AI 归纳</span><small>复用回复服务模型</small></div>
+            <div><strong>04</strong><span>富文本输出</span><small>可展开详情与原消息链接</small></div>
+          </div>
+          <div class="red-packet-summary">
+            <span id="userProfileModuleState" class="tag">模块状态</span>
+            <span class="tag">默认 40 条样本</span>
+            <span class="tag">结构化 JSON</span>
+            <span class="tag">Telegram HTML</span>
+          </div>
+          <form id="userProfileSettingsForm" class="setting-form ai-setting-form">
+            <label><span>触发命令</span><textarea name="command_prefixes" rows="5" placeholder="/profile&#10;/fx&#10;.fx&#10;画像&#10;用户画像"></textarea></label>
+            <label><span>默认样本数</span><input name="default_sample_size" type="number" min="3" max="2000" step="1"></label>
+            <label><span>命令可用最小样本数</span><input name="min_sample_size" type="number" min="3" max="2000" step="1"></label>
+            <label><span>命令可用最大样本数</span><input name="max_sample_size" type="number" min="10" max="2000" step="1"></label>
+            <label><span>生成所需最少样本</span><input name="min_required_samples" type="number" min="3" max="2000" step="1"></label>
+            <label><span>AI 超时秒数</span><input name="timeout_seconds" type="number" min="5" max="600" step="1"></label>
+            <label><span>最大输出 Tokens</span><input name="max_tokens" type="number" min="512" max="12000" step="128"></label>
+            <div class="inline-setting"><span>消息进度</span><small class="hint">命令会原地改为“分析中”，随后继续更新为画像结果；编辑失败时自动补发结果。</small></div>
+            <label class="wide-field"><span>画像写作风格</span><textarea name="style_prompt" rows="4" placeholder="毒舌、有梗、敢吐槽，允许适度夸张……"></textarea><small class="hint">可以像群友互损一样起外号、玩反差，但敏感属性、恶意羞辱、外貌攻击、诊断性标签和伪造引用始终被禁止。</small></label>
+          </form>
+          <div class="gif-help">
+            <span class="tag">回复某人：/profile</span>
+            <span class="tag">回复某人：/profile 80</span>
+            <span class="tag">指定用户：/profile @username 60</span>
+            <span class="tag">跨群全部：/fx all</span>
+            <span class="tag">本群全部：/fx local</span>
+          </div>
+          <div class="profile-privacy-note">
+            <strong>样本边界</strong>
+            <p>群聊文字会保存在本地 SQLite 供分析使用，但画像结论和派生标签不会持久化，不在本地建立持久用户档案。结果只描述群聊中呈现的发言风格，不推断敏感属性，不作心理诊断。</p>
+          </div>
+          <div class="ai-save-panel inline-save">
+            <span id="userProfileSaveState" class="hint">保存后新的画像命令会实时使用新配置。</span>
+          </div>
+        </section>
+      </section>
+
+      <section id="moduleAiImage" class="view">
+        <section class="panel ai-config-panel">
+          <div class="panel-head">
+            <div>
+              <h2>AI 生图</h2>
+              <p class="hint">作图命令、尺寸比例、发送策略都可在页面配置。</p>
+            </div>
+          </div>
+          <form id="imageSettingsForm" class="setting-form ai-setting-form">
+            <label><span>作图命令</span><textarea name="command_prefixes" rows="3" placeholder="/draw"></textarea></label>
+            <label><span>尺寸命令</span><textarea name="size_commands" rows="3" placeholder="/draw_size&#10;/size"></textarea></label>
+            <label><span>比例命令</span><textarea name="ratio_commands" rows="3" placeholder="/draw_ratio&#10;/ratio"></textarea></label>
+            <label><span>发送命令</span><textarea name="send_mode_commands" rows="3" placeholder="/send_mode&#10;/draw_send"></textarea></label>
+            <label><span>模型命令</span><textarea name="model_commands" rows="3" placeholder="/draw_model&#10;/image_model"></textarea></label>
+            <label><span>默认尺寸</span><select name="size"><option value="1K">1K</option><option value="2K">2K</option><option value="4K">4K</option></select></label>
+            <label><span>默认比例</span><input name="ratio" type="text" placeholder="1:1 / 16:9 / auto"></label>
+            <label><span>生成质量</span><select name="quality"><option value="standard">standard</option><option value="high">high</option><option value="medium">medium</option><option value="low">low</option></select></label>
+            <label><span>发送模式</span><select name="send_mode"><option value="auto">auto</option><option value="always">always 原图文件</option><option value="never">never 图片预览</option></select></label>
+            <label><span>超时秒数</span><input name="timeout_seconds" type="number" min="5" step="1"></label>
+            <label><span>输出目录</span><input name="output_dir" type="text" placeholder="runtime/data/generated_images"></label>
+            <label><span>设置文件</span><input name="settings_store" type="text" placeholder="runtime/data/image_settings.json"></label>
+          </form>
+          <div class="ai-save-panel inline-save">
+            <button id="saveAiImageConfig" class="primary">保存生图配置</button>
+            <span id="imageSaveState" class="hint">修改只影响新请求，已发出的请求不会被中断。</span>
+          </div>
+        </section>
+      </section>
+
+      <section id="moduleAiDecrypt" class="view">
+        <section class="panel ai-config-panel">
+          <div class="panel-head">
+            <div>
+              <h2>AI 解密</h2>
+              <p class="hint">命中解密游戏模板后读取当前消息图片和文字，调用 AI 解题并自动发送最终答案。</p>
+            </div>
+            <button id="addDecryptTemplate">新增模板</button>
+          </div>
+          <form id="decryptSettingsForm" class="setting-form ai-setting-form">
+            <label><span>超时秒数</span><input name="timeout_seconds" type="number" min="5" step="1"></label>
+            <label><span>最大 Tokens</span><input name="max_tokens" type="number" min="16" max="4096" step="16"></label>
+            <label><span>图片细节</span><select name="image_detail"><option value="low">low</option><option value="high">high</option><option value="auto">auto</option><option value="original">original</option></select></label>
+            <label><span>发送延迟</span><input name="send_delay_ms" type="number" min="0" max="60000" step="100"></label>
+            <label class="wide-field"><span>去重记录文件</span><input name="state_store" type="text" placeholder="runtime/data/ai_decrypt_claimed_ids.json"></label>
+          </form>
+          <div id="decryptTemplates" class="template-list"></div>
+          <div class="ai-save-panel inline-save">
+            <button id="saveAiDecryptConfig" class="primary">保存 AI 解密配置</button>
+            <span id="decryptSaveState" class="hint">保存后新的解密请求会实时使用新配置。</span>
+          </div>
+        </section>
+      </section>
+
+      <section id="moduleGif" class="view">
+        <section class="panel ai-config-panel">
+          <div class="panel-head">
+            <div>
+              <h2>GIF动图</h2>
+              <p class="hint">回复视频/GIF/WebP 后触发，可按自然语言时间段截取：从头到第十秒、从第三秒到最后、十一分三十秒到十一分五十秒。</p>
+            </div>
+          </div>
+          <form id="gifSettingsForm" class="setting-form ai-setting-form">
+            <label><span>触发命令</span><textarea name="command_prefixes" rows="3" placeholder="/vgif&#10;动图&#10;视频动图&#10;转动图"></textarea></label>
+            <label><span>输出目录</span><input name="output_dir" type="text" placeholder="runtime/data/generated_gifs"></label>
+            <label><span>最长截取秒数</span><input name="max_seconds" type="number" min="1" max="120" step="1"></label>
+            <label><span>FPS</span><input name="fps" type="number" min="1" max="30" step="1"></label>
+            <label><span>宽度</span><input name="width" type="text" placeholder="auto / 480 / 720"></label>
+            <label><span>目标最大字节</span><input name="max_bytes" type="number" min="0" step="1024"></label>
+          </form>
+          <div class="gif-help">
+            <span class="tag">例：动图 从头开始到第十秒</span>
+            <span class="tag">例：动图 从第三秒到最后</span>
+            <span class="tag">例：动图 从11分30秒到11分50秒</span>
+            <span class="tag">例：/vgif 11:30-11:50</span>
+          </div>
+          <div class="ai-save-panel inline-save">
+            <button id="saveGifConfig" class="primary">保存 GIF 配置</button>
+            <span id="gifSaveState" class="hint">保存后新的 GIF 截取请求会实时使用新配置。</span>
+          </div>
+        </section>
+      </section>
+
+      <section id="moduleWordCloud" class="view">
+        <section class="panel ai-config-panel">
+          <div class="panel-head">
+            <div>
+              <h2>词云</h2>
+              <p class="hint">按指令统计当前群最近消息，每个群独立生成热词云图片。</p>
+            </div>
+            <button id="saveWordCloudConfig" class="primary">保存词云配置</button>
+          </div>
+          <div class="red-packet-summary">
+            <span id="wordCloudModuleState" class="tag">模块状态</span>
+            <span class="tag">当前群统计</span>
+            <span class="tag">Pillow 图片生成</span>
+          </div>
+          <form id="wordCloudSettingsForm" class="setting-form ai-setting-form">
+            <label><span>触发命令</span><textarea name="command_prefixes" rows="3" placeholder="cy&#10;/cy"></textarea></label>
+            <label><span>默认统计条数</span><input name="default_limit" type="number" min="10" max="10000" step="50"></label>
+            <label><span>最小统计条数</span><input name="min_limit" type="number" min="10" max="10000" step="10"></label>
+            <label><span>最大统计条数</span><input name="max_limit" type="number" min="50" max="10000" step="50"></label>
+            <label><span>图片宽度</span><input name="width" type="number" min="480" max="2400" step="10"></label>
+            <label><span>图片高度</span><input name="height" type="number" min="360" max="1800" step="10"></label>
+            <label><span>输出目录</span><input name="output_dir" type="text" placeholder="runtime/data/generated_word_clouds"></label>
+            <label><span>忽略命令前缀</span><textarea name="ignore_command_prefixes" rows="3" placeholder="/&#10;.&#10;,"></textarea></label>
+            <label class="wide-field"><span>额外停用词</span><textarea name="stop_words" rows="4" placeholder="每行一个词"></textarea></label>
+            <label class="inline-setting"><span>触发后删除命令</span><input name="delete_command" type="checkbox"></label>
+          </form>
+          <div class="gif-help">
+            <span class="tag">例：cy</span>
+            <span class="tag">例：cy 500</span>
+            <span class="tag">例：/cy 2000</span>
+          </div>
+          <div class="ai-save-panel inline-save">
+            <span id="wordCloudSaveState" class="hint">保存后新的词云命令会实时使用新配置。</span>
+          </div>
+        </section>
+      </section>
+
+      <section id="moduleCheckin" class="view">
+        <section class="panel ai-config-panel">
+          <div class="panel-head">
+            <div>
+              <h2>自动签到</h2>
+              <p class="hint">选择群组或 Bot，使用标准 5 段 Cron（分 时 日 月 周）安排发送；输入时会实时解释当前通知方式。</p>
+            </div>
+            <div class="module-actions">
+              <button id="loadCheckinTargets">加载目标</button>
+              <button id="addCheckinTask">新增签到</button>
+              <button id="saveCheckinConfig" class="primary">保存签到配置</button>
+            </div>
+          </div>
+          <div class="red-packet-summary">
+            <span id="checkinModuleState" class="tag">模块状态</span>
+            <span id="checkinTaskCount" class="tag">签到 0 个</span>
+            <span id="checkinTargetState" class="hint">可手填 chat_id、@username，或加载目标后选择。</span>
+          </div>
+          <div class="cron-guide hint">
+            <strong>Cron 提示</strong>
+            <span><code>*/30 * * * *</code> 表示每隔 30 分钟；<code>0 9 * * 1</code> 表示每周一 09:00。日期步长（如 <code>*/3</code>）按每月日期重新计算。</span>
+          </div>
+          <div id="checkinTasks" class="template-list"></div>
+          <div class="ai-save-panel inline-save">
+            <span id="checkinSaveState" class="hint">保存后自动签到调度会实时使用新配置。</span>
+          </div>
+        </section>
+      </section>
+
+      <section id="moduleAutoForward" class="view">
+        <section class="panel ai-config-panel">
+          <div class="panel-head">
+            <div>
+              <h2>自动转发</h2>
+              <p class="hint">回复某条消息发送命令后，按不同模式把被回复的消息回传到当前聊天。</p>
+            </div>
+            <button id="saveAutoForwardConfig" class="primary">保存自动转发配置</button>
+          </div>
+          <div class="red-packet-summary">
+            <span id="autoForwardModuleState" class="tag">模块状态</span>
+            <span class="tag">仅响应自己发出的命令</span>
+            <span class="tag">四种转发模式</span>
+          </div>
+          <form id="autoForwardSettingsForm" class="setting-form ai-setting-form">
+            <label><span>原生转发命令</span><textarea name="command_prefixes" rows="2" placeholder=",re"></textarea></label>
+            <label><span>复制文本命令</span><textarea name="copy_text_command_prefixes" rows="2" placeholder=",copy"></textarea></label>
+            <label><span>引用包装命令</span><textarea name="quote_command_prefixes" rows="2" placeholder=",quote"></textarea></label>
+            <label><span>仅发链接命令</span><textarea name="link_command_prefixes" rows="2" placeholder=",link"></textarea></label>
+            <label class="inline-setting"><span>转发成功后删除命令</span><input name="delete_command" type="checkbox"></label>
+          </form>
+          <div class="gif-help">
+            <span class="tag">,re：原生转发，携带原作者</span>
+            <span class="tag">,copy：只复制文本，不显示原作者</span>
+            <span class="tag">,quote：带“来自 X”前缀引用包装</span>
+            <span class="tag">,link：公开群消息链接</span>
+          </div>
+          <div class="ai-save-panel inline-save">
+            <span id="autoForwardSaveState" class="hint">保存后新的转发命令会实时使用新配置。</span>
+          </div>
+        </section>
+      </section>
+
+      <section id="moduleMagnetImport" class="view">
+        <section class="panel ai-config-panel">
+          <div class="panel-head">
+            <div>
+              <h2>磁力数据导入</h2>
+              <p class="hint">监听指定群里指定用户发送的 CSV 数据文件，分块下载后导入 MagnetBoard「数据交换中心」，成功后回复原消息并删除临时文件。</p>
+            </div>
+            <button id="saveMagnetImportConfig" class="primary">保存磁力数据导入配置</button>
+          </div>
+          <div class="red-packet-summary">
+            <span id="magnetImportModuleState" class="tag">模块状态</span>
+            <span id="magnetImportPasswordState" class="tag">密码状态</span>
+            <span id="magnetImportCount" class="tag">累计导入 0 次</span>
+          </div>
+          <p id="magnetImportLast" class="hint">暂无导入记录</p>
+          <form id="magnetImportSettingsForm" class="setting-form ai-setting-form">
+            <label><span>监听群 ID（每行一个）</span><textarea name="watch_chats" rows="2" placeholder="-1000000000002"></textarea></label>
+            <label><span>发送者用户名（每行一个，不带 @）</span><textarea name="sender_usernames" rows="2" placeholder="example_sender"></textarea></label>
+            <label><span>发送者用户 ID（可选，每行一个）</span><textarea name="sender_ids" rows="2"></textarea></label>
+            <label><span>文件名正则</span><input name="file_name_pattern" type="text" placeholder="^x1080x.*\.csv$"></label>
+            <label><span>文件大小上限（MB）</span><input name="max_file_size_mb" type="number" min="1" max="4096" step="1"></label>
+            <label><span>下载重试次数</span><input name="download_retries" type="number" min="1" max="20" step="1"></label>
+            <label class="wide-field"><span>MagnetBoard 地址</span><input name="api_base_url" type="text" placeholder="http://127.0.0.1:8022"></label>
+            <label><span>MagnetBoard 用户名</span><input name="api_username" type="text" autocomplete="off" placeholder="admin"></label>
+            <label class="secret-field"><span>MagnetBoard 密码</span><span class="secret-input"><input name="api_password" type="password" autocomplete="new-password" data-secret-input placeholder="留空则不修改"><button type="button" class="secret-toggle" data-secret-toggle aria-pressed="false">显示</button></span></label>
+            <label><span>导入超时（秒）</span><input name="import_timeout_seconds" type="number" min="30" max="7200" step="30"></label>
+            <label class="inline-setting"><span>更新已存在的记录</span><input name="update_existing" type="checkbox"></label>
+            <label class="inline-setting"><span>跳过重复记录</span><input name="skip_duplicates" type="checkbox"></label>
+            <label class="wide-field"><span>导入成功后回复</span><input name="reply_text" type="text" placeholder="已自动导入，谢谢老大"></label>
+          </form>
+          <div class="gif-help">
+            <span class="tag">断点续传下载</span>
+            <span class="tag">同一消息只导入一次</span>
+            <span class="tag">完成后自动删除文件</span>
+          </div>
+          <div class="ai-save-panel inline-save">
+            <span id="magnetImportSaveState" class="hint">保存后新收到的文件会使用新配置。</span>
+          </div>
+        </section>
+      </section>
+
+      <section id="moduleQuote" class="view">
+        <section class="panel ai-config-panel">
+          <div class="panel-head">
+            <div>
+              <h2>语录贴纸</h2>
+              <p class="hint">回复消息用 /q 或 语录 生成语录贴纸；渲染由第三方 quote-api 完成（消息文本与发送者头像会发送给该服务）。</p>
+            </div>
+            <button id="saveQuoteConfig" class="primary">保存语录配置</button>
+          </div>
+          <div class="red-packet-summary">
+            <span id="quoteModuleState" class="tag">模块状态</span>
+            <span class="tag">/q s 存贴纸包</span>
+            <span class="tag">TGS 媒体需 rlottie-python</span>
+          </div>
+          <form id="quoteSettingsForm" class="setting-form ai-setting-form">
+            <label><span>触发命令</span><textarea name="command_prefixes" rows="3" placeholder="/q&#10;语录"></textarea></label>
+            <label class="wide-field"><span>quote-api 地址</span><input name="api_url" type="text" placeholder="https://quote-api-enhanced.zhetengsha.eu.org/generate.webp"></label>
+            <label><span>贴纸包短名</span><input name="sticker_set_short_name" type="text" placeholder="留空则不启用 /q s"></label>
+            <label><span>背景色</span><input name="background_color" type="text" placeholder="#1b1429"></label>
+            <label><span>最多合成条数</span><input name="max_messages" type="number" min="1" max="10" step="1"></label>
+            <label><span>画布宽度</span><input name="width" type="number" min="256" max="2048" step="1"></label>
+            <label><span>画布高度</span><input name="height" type="number" min="256" max="4096" step="1"></label>
+            <label><span>缩放</span><input name="scale" type="number" min="1" max="4" step="1"></label>
+            <label><span>Emoji 风格</span><input name="emoji_brand" type="text" placeholder="apple"></label>
+            <label><span>超时秒数</span><input name="timeout_seconds" type="number" min="5" max="300" step="1"></label>
+            <label class="wide-field"><span>临时目录</span><input name="tmp_dir" type="text" placeholder="runtime/tmp"></label>
+          </form>
+          <div class="gif-help">
+            <span class="tag">例：语录</span>
+            <span class="tag">例：/q 3</span>
+            <span class="tag">例：/q r</span>
+            <span class="tag">例：/q f 自定义文字</span>
+            <span class="tag">例：/q config sticker mypack</span>
+          </div>
+          <div class="ai-save-panel inline-save">
+            <span id="quoteSaveState" class="hint">保存后新的语录命令会实时使用新配置。</span>
+          </div>
+        </section>
+      </section>
+
+      <section id="moduleChatGames" class="view">
+        <section class="panel ai-config-panel">
+          <div class="panel-head">
+            <div>
+              <h2>聊天小游戏</h2>
+              <p class="hint">管理今日幸运词、Emoji 图谜和乱码解码。中奖时直接回复命中消息，把加分交给群里的积分机器人。</p>
+            </div>
+            <button id="saveChatGamesConfig" class="primary">保存小游戏配置</button>
+          </div>
+          <div class="red-packet-summary">
+            <span id="chatGamesModuleState" class="tag">模块状态</span>
+            <span class="tag">今日幸运词</span>
+            <span class="tag">Emoji 图谜</span>
+            <span class="tag">乱码解码</span>
+          </div>
+          <form id="chatGamesSettingsForm" class="setting-form ai-setting-form">
+            <label class="wide-field"><span>状态文件</span><input name="state_store" type="text" placeholder="runtime/data/chat_games_state.json"></label>
+            <label class="wide-field"><span>图片输出目录</span><input name="output_dir" type="text" placeholder="runtime/data/generated_chat_games"></label>
+
+            <p class="wide-field hint">—— 今日幸运词 ——</p>
+            <label class="inline-setting"><span>启用幸运词</span><input name="lucky_enabled" type="checkbox"></label>
+            <label><span>奖励文本</span><input name="lucky_reward_text" type="text" placeholder="+100"></label>
+            <label><span>每群每日次数</span><input name="lucky_daily_limit_per_chat" type="number" min="0" max="50" step="1"></label>
+            <label><span>每人每日次数</span><input name="lucky_per_user_daily_limit" type="number" min="0" max="20" step="1"></label>
+            <label><span>最短消息长度</span><input name="lucky_min_message_length" type="number" min="1" max="80" step="1"></label>
+            <label><span>忽略前缀</span><textarea name="lucky_ignore_command_prefixes" rows="3" placeholder="/&#10;.&#10;,&#10;+"></textarea></label>
+            <label class="wide-field"><span>幸运词</span><textarea name="lucky_words" rows="5" placeholder="咖啡&#10;服务器&#10;重启"></textarea></label>
+
+            <p class="wide-field hint">—— Emoji 图谜 ——</p>
+            <label class="inline-setting"><span>启用图谜</span><input name="emoji_enabled" type="checkbox"></label>
+            <label><span>触发命令</span><textarea name="emoji_command_prefixes" rows="3" placeholder="/emoji&#10;/emojiriddle&#10;图谜"></textarea></label>
+            <label><span>答题秒数</span><input name="emoji_duration_seconds" type="number" min="5" max="300" step="1"></label>
+            <label><span>奖励文本</span><input name="emoji_reward_text" type="text" placeholder="+100"></label>
+            <label><span>赢家策略</span><select name="emoji_winner_policy"><option value="first">第一个答中</option><option value="random">随机抽取答中者</option></select></label>
+            <label class="inline-setting"><span>公布答案</span><input name="emoji_announce_answer" type="checkbox"></label>
+            <label class="inline-setting"><span>删除开局命令</span><input name="emoji_delete_command" type="checkbox"></label>
+            <label class="wide-field"><span>题库</span><textarea name="emoji_items" rows="6" placeholder="🌧️ + 🏠 + 🐟 | 漏网之鱼 | 可选提示&#10;🔥 + 🧊 | 冰火两重天,冰火"></textarea></label>
+
+            <p class="wide-field hint">—— 乱码解码 ——</p>
+            <label class="inline-setting"><span>启用乱码解码</span><input name="decode_enabled" type="checkbox"></label>
+            <label><span>触发命令</span><textarea name="decode_command_prefixes" rows="3" placeholder="/decode&#10;/garble&#10;乱码"></textarea></label>
+            <label><span>答题秒数</span><input name="decode_duration_seconds" type="number" min="5" max="300" step="1"></label>
+            <label><span>奖励文本</span><input name="decode_reward_text" type="text" placeholder="+100"></label>
+            <label><span>赢家策略</span><select name="decode_winner_policy"><option value="first">第一个答中</option><option value="random">随机抽取答中者</option></select></label>
+            <label class="inline-setting"><span>公布答案</span><input name="decode_announce_answer" type="checkbox"></label>
+            <label class="inline-setting"><span>删除开局命令</span><input name="decode_delete_command" type="checkbox"></label>
+            <label class="wide-field"><span>默认短句库</span><textarea name="decode_phrases" rows="5" placeholder="今天加鸡腿&#10;服务器又活了&#10;咖啡续命"></textarea></label>
+          </form>
+          <div class="gif-help">
+            <span class="tag">例：/emoji 200</span>
+            <span class="tag">例：/decode +300</span>
+            <span class="tag">例：/decode 今晚重启NAS</span>
+            <span class="tag">例：/decode 300 今晚重启NAS</span>
+            <span class="tag">幸运词命中后自动回复奖励文本</span>
+          </div>
+          <div class="ai-save-panel inline-save">
+            <span id="chatGamesSaveState" class="hint">保存后新的小游戏请求会实时使用新配置。</span>
+          </div>
+        </section>
+      </section>
+
+      
+
+      
+
+      <section id="aiServices" class="view">
+        <section class="panel ai-config-panel">
+          <div class="panel-head">
+            <div>
+              <h2>AI 服务配置</h2>
+              <p class="hint">这里只管理 AI 服务连接信息；具体功能的触发词、命令和策略在各功能模块页配置。</p>
+            </div>
+            <button id="saveAiServicesConfig" class="primary">保存服务配置</button>
+          </div>
+          <div class="ai-service-layout">
+            <section class="provider-card">
+              <div class="provider-head">
+                <h3>回复服务</h3>
+                <span id="replyKeyState" class="mini-state">未配置 Key</span>
+              </div>
+              <form class="service-form ai-service-form" data-provider="reply_provider">
+                <label><span>服务名称</span><input name="name" type="text" placeholder="default"></label>
+                <label><span>提供商类型</span><select name="provider_type"><option value="openai">OpenAI（Responses）</option><option value="claude">Claude / Anthropic（Messages）</option><option value="openai-compatible">OpenAI-Compatible（Responses）</option><option value="openai-compatible-chat">OpenAI-Compatible（Chat Completions）</option></select></label>
+                <label><span>URL</span><input name="base_url" type="text" placeholder="https://api.openai.com/v1"></label>
+                <label class="secret-field"><span>API Key</span><span class="secret-input"><input name="api_key" type="password" data-secret-input placeholder="输入时可见，留空则不修改"><button type="button" class="secret-toggle" data-secret-toggle aria-pressed="false">显示</button></span></label>
+                <label><span>模型</span><input name="model" type="text" placeholder="gpt-5.5"></label>
+              </form>
+            </section>
+            <section class="provider-card">
+              <div class="provider-head">
+                <h3>生图服务</h3>
+                <span id="imageKeyState" class="mini-state">未配置 Key</span>
+              </div>
+              <form class="service-form ai-service-form" data-provider="image_provider">
+                <label><span>服务名称</span><input name="name" type="text" placeholder="image"></label>
+                <label><span>提供商类型</span><select name="provider_type"><option value="openai">OpenAI（Responses）</option><option value="claude">Claude / Anthropic（Messages）</option><option value="openai-compatible">OpenAI-Compatible（Responses）</option><option value="openai-compatible-chat">OpenAI-Compatible（Chat Completions）</option><option value="xai-imagine">xAI-Compatible（Imagine Images）</option></select></label>
+                <label><span>URL</span><input name="base_url" type="text" placeholder="https://api.openai.com/v1"></label>
+                <label class="secret-field"><span>API Key</span><span class="secret-input"><input name="api_key" type="password" data-secret-input placeholder="输入时可见，留空则沿用回复 Key"><button type="button" class="secret-toggle" data-secret-toggle aria-pressed="false">显示</button></span></label>
+                <label><span>模型</span><input name="model" type="text" placeholder="gpt-image-2"></label>
+              </form>
+            </section>
+          </div>
+          <div class="ai-save-panel inline-save">
+            <span id="aiServiceSaveState" class="hint">保存后新的 AI 请求会使用新的服务连接信息。</span>
+          </div>
+        </section>
+      </section>
+
+      <section id="aiUsage" class="view">
+          <section class="panel">
+            <div class="panel-head">
+              <h2>AI Token 用量</h2>
+              <div class="usage-actions">
+                <select id="usageRange">
+                  <option value="today">今日</option>
+                  <option value="7d">近 7 天</option>
+                  <option value="30d">近 30 天</option>
+                  <option value="all">全部</option>
+                </select>
+                <button id="refreshUsage">刷新</button>
+              </div>
+            </div>
+            <div id="usageKpis" class="usage-kpis"></div>
+          </section>
+          <div class="split">
+            <section class="panel">
+              <div class="panel-head"><h2>按模型统计</h2></div>
+              <div class="usage-table-wrap">
+                <table class="usage-table">
+                  <thead><tr><th>模型</th><th>请求数</th><th>Token</th><th>输入</th><th>输出</th><th>平均耗时</th><th>成功率</th></tr></thead>
+                  <tbody id="usageModelRows"></tbody>
+                </table>
+              </div>
+            </section>
+            <section class="panel">
+              <div class="panel-head"><h2>按功能统计</h2></div>
+              <div class="usage-table-wrap">
+                <table class="usage-table">
+                  <thead><tr><th>功能</th><th>请求数</th><th>Token</th><th>平均耗时</th><th>成功率</th></tr></thead>
+              <tbody id="usageFeatureRows"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+      </section>
+
+      <section id="logs" class="view">
+        <div class="split wide-left">
+          <section class="panel">
+            <div class="panel-head">
+              <h2>实时日志</h2>
+              <div class="log-actions">
+                <label class="auto-refresh-toggle"><input id="autoRefreshLogs" type="checkbox" checked> 自动刷新</label>
+                <label class="log-refresh-interval">间隔 <input id="logRefreshInterval" type="number" min="0.1" step="0.1" value="1"> 秒</label>
+                <span id="logRefreshState" class="hint">实时日志每 1 秒刷新</span>
+                <button id="refreshLogs">刷新</button>
+              </div>
+            </div>
+            <pre id="liveLogs" class="log-box large"></pre>
+          </section>
+          <section class="panel">
+            <div class="panel-head"><h2>历史日志</h2></div>
+            <div id="logFiles" class="file-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="settings" class="view">
+        <section class="panel settings-panel">
+          <div class="panel-head">
+            <div>
+              <h2>监听群组</h2>
+              <p class="hint">点击加载群组后勾选需要监听的 Telegram 群组。</p>
+            </div>
+            <div class="group-actions">
+              <button id="loadGroups">加载群组</button>
+              <button id="saveGroups" class="primary">保存</button>
+            </div>
+          </div>
+          <div class="group-summary">
+            <strong id="groupCount">已选择 0 个群组</strong>
+            <span id="groupLoadState">尚未加载群组列表</span>
+          </div>
+          <div id="selectedGroupNames" class="selected-group-names"></div>
+          <div id="groupList" class="group-list">
+            <div class="empty-state">加载后可以直接勾选群组；如果 Telegram 未连接，请先确认 session 和 api_id/api_hash 配置。</div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <div id="toastHost" class="toast-host" aria-live="polite" aria-atomic="true"></div>
+    <script src="/app.js"></script>
+  </body>
+</html>

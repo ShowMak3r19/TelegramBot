@@ -1,0 +1,9 @@
+telethon>=1.44.0
+python-dotenv>=1.0.0
+openai>=1.79.0
+# provider_type=claude/anthropic 时走 Anthropic Messages API；联网搜索/思考摘要等较新特性建议使用较新版本。
+anthropic>=0.40.0
+pillow>=10.0.0
+pytesseract>=0.3.10
+# 可选：rlottie-python 用于语录贴纸(quote)的 TGS 动态贴纸媒体，缺失时自动跳过。
+# rlottie-python>=1.3.0

@@ -1,0 +1,18 @@
+[Unit]
+Description=TelegramBot management and Telegram service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=telegrambot
+Group=telegrambot
+WorkingDirectory=/opt/telegrambot
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/telegrambot/.venv/bin/python -m telegram_bot --config /opt/telegrambot/config.json
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target
