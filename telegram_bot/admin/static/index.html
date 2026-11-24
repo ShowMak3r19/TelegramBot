@@ -50,7 +50,7 @@
         } catch (_e) {}
       })();
     </script>
-    <link rel="stylesheet" href="/styles.css?v=20261124c" />
+    <link rel="stylesheet" href="/styles.css?v=20261124d" />
   </head>
   <body>
     <!-- Full-Viewport Ambient Wallpaper & Dynamic Motion Stage -->
@@ -430,6 +430,16 @@
               <div class="search-input-wrap">
                 <span class="nav-ico" data-icon="search"></span>
                 <input id="moduleSearchInput" type="search" placeholder="筛选模块名称或用途..." autocomplete="off" />
+              </div>
+              <div class="hub-transfer-actions">
+                <button id="openModuleExportBtn" type="button" class="ghost-btn compact-btn" title="导出功能模块配置（不含系统配置与 AI 服务）">
+                  <span class="nav-ico mini-ico" data-icon="download"></span>
+                  <span>导出配置</span>
+                </button>
+                <button id="openModuleImportBtn" type="button" class="ghost-btn compact-btn" title="从 JSON 文件导入功能模块配置">
+                  <span class="nav-ico mini-ico" data-icon="upload"></span>
+                  <span>导入配置</span>
+                </button>
               </div>
             </div>
           </div>
@@ -1965,8 +1975,97 @@
       </div>
     </div>
 
+    <!-- Module Config Export Modal -->
+    <div id="moduleExportDialog" class="glass-dialog-wrap hidden" role="dialog" aria-modal="true" aria-labelledby="moduleExportTitle">
+      <div class="glass-dialog-backdrop" data-close-transfer="export"></div>
+      <div class="glass-dialog transfer-dialog">
+        <header class="glass-dialog-head">
+          <div class="glass-dialog-title">
+            <span class="nav-ico dialog-ico" data-icon="download"></span>
+            <div>
+              <h2 id="moduleExportTitle">导出功能模块配置</h2>
+              <p>仅导出勾选的功能模块配置与开关状态；不包含系统配置、AI 服务连接/Key 及外部密码。</p>
+            </div>
+          </div>
+          <button type="button" class="icon-btn dialog-close-btn" data-close-transfer="export" aria-label="关闭">✕</button>
+        </header>
+        <div class="glass-dialog-body">
+          <div class="transfer-bar">
+            <div class="transfer-bar-actions">
+              <button id="moduleExportSelectAll" type="button" class="ghost-btn compact-btn">全选</button>
+              <button id="moduleExportSelectEnabled" type="button" class="ghost-btn compact-btn">仅选已启用</button>
+              <button id="moduleExportSelectNone" type="button" class="ghost-btn compact-btn">清空</button>
+            </div>
+            <span id="moduleExportSummary" class="tag">已选 0 个模块</span>
+          </div>
+          <div id="moduleExportList" class="transfer-group-list"></div>
+          <p class="transfer-safety-note">提示：Telegram 凭据、监听群组、后台鉴权、AI 服务地址/模型/API Key 以及外部服务密码不会写入导出文件。</p>
+        </div>
+        <footer class="glass-dialog-foot">
+          <span class="hint">导出为标准 JSON 文件，可用于同版本或新实例迁移。</span>
+          <div class="transfer-foot-actions">
+            <button type="button" class="ghost-btn" data-close-transfer="export">取消</button>
+            <button id="confirmModuleExportBtn" type="button" class="primary">导出 JSON</button>
+          </div>
+        </footer>
+      </div>
+    </div>
+
+    <!-- Module Config Import Modal -->
+    <div id="moduleImportDialog" class="glass-dialog-wrap hidden" role="dialog" aria-modal="true" aria-labelledby="moduleImportTitle">
+      <div class="glass-dialog-backdrop" data-close-transfer="import"></div>
+      <div class="glass-dialog transfer-dialog">
+        <header class="glass-dialog-head">
+          <div class="glass-dialog-title">
+            <span class="nav-ico dialog-ico" data-icon="upload"></span>
+            <div>
+              <h2 id="moduleImportTitle">导入功能模块配置</h2>
+              <p>选择导出的 JSON 备份并勾选需要恢复的模块；系统配置与 AI 服务始终保持不变。</p>
+            </div>
+          </div>
+          <button type="button" class="icon-btn dialog-close-btn" data-close-transfer="import" aria-label="关闭">✕</button>
+        </header>
+        <div class="glass-dialog-body">
+          <input id="moduleImportFileInput" type="file" accept=".json,application/json" class="hidden" />
+          <div id="moduleImportDropzone" class="transfer-dropzone" role="button" tabindex="0">
+            <span class="nav-ico" data-icon="upload"></span>
+            <div class="transfer-dropzone-copy">
+              <strong id="moduleImportFileLabel">点击选择或拖入功能模块配置 JSON 文件</strong>
+              <small id="moduleImportFileMeta">仅读取功能模块配置，任何非模块配置项都会自动忽略</small>
+            </div>
+            <button id="moduleImportPickBtn" type="button" class="ghost-btn compact-btn">选择文件</button>
+          </div>
+          <div id="moduleImportPreview" class="transfer-preview hidden">
+            <div class="transfer-bar">
+              <div class="transfer-bar-actions">
+                <button id="moduleImportSelectAll" type="button" class="ghost-btn compact-btn">全选</button>
+                <button id="moduleImportSelectNone" type="button" class="ghost-btn compact-btn">清空</button>
+              </div>
+              <span id="moduleImportSummary" class="tag">已选 0 个模块</span>
+            </div>
+            <label class="inline-setting toggle-row transfer-toggle-row">
+              <div>
+                <span>同时应用模块启用状态</span>
+                <small>关闭时仅导入参数配置，不改变当前各模块的启用/停用开关</small>
+              </div>
+              <input id="moduleImportApplyEnabled" type="checkbox" checked />
+            </label>
+            <div id="moduleImportList" class="transfer-group-list"></div>
+          </div>
+          <div id="moduleImportError" class="transfer-error hidden" role="alert"></div>
+        </div>
+        <footer class="glass-dialog-foot">
+          <span class="hint">外部服务密码留空时将保留当前环境已有密码。</span>
+          <div class="transfer-foot-actions">
+            <button type="button" class="ghost-btn" data-close-transfer="import">取消</button>
+            <button id="confirmModuleImportBtn" type="button" class="primary" disabled>确认导入</button>
+          </div>
+        </footer>
+      </div>
+    </div>
+
     <div id="toastHost" class="toast-host" aria-live="polite" aria-atomic="true"></div>
-    <script src="/app.js?v=20261124c"></script>
+    <script src="/app.js?v=20261124d"></script>
     <script src="/ui_studio.js?v=20261124c"></script>
   </body>
 </html>

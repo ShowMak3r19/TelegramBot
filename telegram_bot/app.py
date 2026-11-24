@@ -8,6 +8,7 @@ import signal
 import sys
 import time
 from dataclasses import asdict
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, TypeVar
 
@@ -24,12 +25,35 @@ from .usage import build_ai_usage_stats
 T = TypeVar("T")
 logger = logging.getLogger(__name__)
 
+MODULE_CONFIG_EXPORT_FORMAT = "telebot-modules-config"
+MODULE_CONFIG_EXPORT_VERSION = 1
+_MODULE_CONFIG_ATTRS: dict[str, str] = {
+    "red_packet": "red_packet",
+    "send_red_packet": "send_red_packet",
+    "ai_decrypt": "ai_decrypt",
+    "gif": "gif",
+    "checkin": "checkin",
+    "auto_forward": "auto_forward",
+    "word_cloud": "word_cloud",
+    "user_profile": "user_profile",
+    "quote": "quote",
+    "chat_games": "chat_games",
+    "magnet_import": "magnet_import",
+    "rex_widget_sync": "rex_widget_sync",
+}
+_AI_SUBCONFIG_MODULES = frozenset({"ai_reply", "ai_image"})
+_EXPORTABLE_MODULE_IDS = frozenset(_MODULE_CONFIG_ATTRS) | _AI_SUBCONFIG_MODULES
+_MODULE_SECRET_FIELDS: dict[str, frozenset[str]] = {
+    "magnet_import": frozenset({"api_password"}),
+    "rex_widget_sync": frozenset({"hub_password"}),
+}
+
 
 class TelegramBotApplication:
-    def __init__(self, config: AppConfig, config_path: Path) -> None:
+    def __init__(self, config: AppConfig, config_path: Path, project_root: Path | None = None) -> None:
         self.config = config
         self.config_path = config_path
-        self.project_root = Path(__file__).resolve().parents[1]
+        self.project_root = Path(project_root) if project_root is not None else Path(__file__).resolve().parents[1]
         self.metrics = RuntimeMetrics()
         self.chat_history = ChatHistoryStore(config.chat_history, self.project_root)
         self.modules: ModuleRegistry = create_default_registry(config, self.project_root, self.chat_history)
@@ -51,6 +75,8 @@ class TelegramBotApplication:
         for module in self.modules.all():
             if hasattr(module, "set_programmatic_message_checker"):
                 module.set_programmatic_message_checker(self.telegram.is_programmatic_message)
+            if hasattr(module, "set_config_saver"):
+                module.set_config_saver(lambda: self.config.save(self.config_path))
         magnet_import = self.modules.get("magnet_import")
         if magnet_import is not None and hasattr(magnet_import, "set_history_reader"):
             magnet_import.set_history_reader(self.telegram.iter_history_messages)
@@ -418,6 +444,168 @@ class TelegramBotApplication:
         self.config.save(self.config_path)
         logger.info("Module updated: %s", module_id)
         return module.card.__dict__
+
+    def export_modules_config(self, module_ids: list[str] | None = None) -> dict[str, Any]:
+        return self._call_on_loop(lambda: self._export_modules_config_sync(module_ids))
+
+    def _export_modules_config_sync(self, module_ids: list[str] | None = None) -> dict[str, Any]:
+        self._sync_runtime_ai_settings_from_modules()
+        wanted = (
+            {str(item).strip() for item in module_ids if str(item).strip()}
+            if module_ids is not None
+            else None
+        )
+        exported_modules: dict[str, dict[str, Any]] = {}
+        for module in self.modules.all():
+            module_id = module.card.id
+            if module_id not in _EXPORTABLE_MODULE_IDS:
+                continue
+            if wanted is not None and module_id not in wanted:
+                continue
+            if module_id == "ai_reply":
+                cfg_data = asdict(self.config.ai.reply)
+            elif module_id == "ai_image":
+                cfg_data = asdict(self.config.ai.image)
+            else:
+                cfg_data = asdict(getattr(self.config, _MODULE_CONFIG_ATTRS[module_id]))
+            for secret_key in _MODULE_SECRET_FIELDS.get(module_id, frozenset()):
+                cfg_data.pop(secret_key, None)
+            exported_modules[module_id] = {
+                "name": module.card.name,
+                "enabled": bool(module.card.enabled),
+                "config": cfg_data,
+            }
+        if not exported_modules:
+            raise ValueError("至少选择一个有效的功能模块")
+        return {
+            "format": MODULE_CONFIG_EXPORT_FORMAT,
+            "schema_version": MODULE_CONFIG_EXPORT_VERSION,
+            "exported_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "project": {
+                "name": self.config.project_name,
+                "version": self.config.version,
+            },
+            "excluded": [
+                "admin",
+                "telegram",
+                "logs",
+                "runtime",
+                "chat_history",
+                "ai.reply_provider",
+                "ai.image_provider",
+                "module_passwords",
+            ],
+            "modules": exported_modules,
+        }
+
+    def import_modules_config(
+        self,
+        payload: dict[str, Any],
+        *,
+        module_ids: list[str] | None = None,
+        apply_enabled: bool = True,
+    ) -> dict[str, Any]:
+        return self._call_on_loop(
+            lambda: self._import_modules_config_sync(
+                payload,
+                module_ids=module_ids,
+                apply_enabled=apply_enabled,
+            )
+        )
+
+    def _import_modules_config_sync(
+        self,
+        payload: dict[str, Any],
+        *,
+        module_ids: list[str] | None = None,
+        apply_enabled: bool = True,
+    ) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError("导入内容必须是 JSON 对象")
+        fmt = payload.get("format")
+        if fmt is not None and str(fmt).strip() != MODULE_CONFIG_EXPORT_FORMAT:
+            raise ValueError("不支持的配置文件格式，请使用功能模块导出的 JSON 文件")
+        raw_modules = payload.get("modules")
+        if not isinstance(raw_modules, dict) or not raw_modules:
+            raise ValueError("配置文件中缺少有效的 modules 字段")
+
+        wanted = (
+            {str(item).strip() for item in module_ids if str(item).strip()}
+            if module_ids is not None
+            else None
+        )
+        registered_map = {m.card.id: m for m in self.modules.all() if m.card.id in _EXPORTABLE_MODULE_IDS}
+        ignored = sorted(key for key in raw_modules if key not in registered_map)
+        targets: list[tuple[str, Any, dict[str, Any]]] = []
+        for module in self.modules.all():
+            module_id = module.card.id
+            if module_id not in registered_map or module_id not in raw_modules:
+                continue
+            if wanted is not None and module_id not in wanted:
+                continue
+            entry = raw_modules[module_id]
+            if not isinstance(entry, dict):
+                raise ValueError(f"模块 {module_id} 配置格式无效")
+            targets.append((module_id, module, entry))
+
+        if not targets:
+            raise ValueError("未找到可导入的功能模块")
+
+        ai_targeted = any(module_id in _AI_SUBCONFIG_MODULES for module_id, _, _ in targets)
+        previous_ai_enabled: dict[str, bool] = {}
+        if ai_targeted:
+            self._sync_runtime_ai_settings_from_modules()
+            previous_ai_enabled = {
+                mid: bool(mod.card.enabled)
+                for mid in ("ai_reply", "ai_image")
+                if (mod := self.modules.get(mid)) is not None
+            }
+
+        imported: list[str] = []
+        for module_id, module, entry in targets:
+            cfg_in = entry.get("config")
+            if module_id == "ai_reply":
+                if isinstance(cfg_in, dict):
+                    self._update_ai_reply_settings(cfg_in)
+                if apply_enabled and "enabled" in entry:
+                    self.config.ai.reply_provider.enabled = bool(entry["enabled"])
+            elif module_id == "ai_image":
+                if isinstance(cfg_in, dict):
+                    self._update_ai_image_settings(cfg_in)
+                if apply_enabled and "enabled" in entry:
+                    self.config.ai.image_provider.enabled = bool(entry["enabled"])
+            else:
+                if isinstance(cfg_in, dict):
+                    cleaned = dict(cfg_in)
+                    for secret_key in _MODULE_SECRET_FIELDS.get(module_id, frozenset()):
+                        if not str(cleaned.get(secret_key) or "").strip():
+                            cleaned.pop(secret_key, None)
+                    module.update_config(cleaned)
+                    if hasattr(module, "config"):
+                        setattr(self.config, _MODULE_CONFIG_ATTRS[module_id], module.config)
+                if apply_enabled and "enabled" in entry:
+                    enabled = bool(entry["enabled"])
+                    changed = bool(module.card.enabled) != enabled
+                    module.card.enabled = enabled
+                    if hasattr(self.config.modules, module_id):
+                        setattr(self.config.modules, module_id, enabled)
+                    if changed:
+                        self._schedule_module_action(module_id, module.start if enabled else module.stop)
+            imported.append(module_id)
+
+        if ai_targeted:
+            self._sync_ai_module_cards()
+            self._apply_ai_module_runtime_changes(previous_ai_enabled)
+
+        self.config.save(self.config_path)
+        logger.info("Modules config imported: modules=%s apply_enabled=%s", imported, apply_enabled)
+        return {
+            "imported": imported,
+            "ignored": ignored,
+            "apply_enabled": bool(apply_enabled),
+            "modules": self.modules.cards(),
+            "ai": self.ai_snapshot(),
+        }
 
     def _public_ai_provider(self, provider: AIProviderConfig) -> dict[str, Any]:
         data = asdict(provider)

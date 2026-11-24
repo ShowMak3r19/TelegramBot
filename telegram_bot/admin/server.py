@@ -274,6 +274,15 @@ class AdminServer:
                     self._json(app.status_snapshot())
                 elif parsed.path == "/api/modules":
                     self._json({"modules": app.modules.cards()})
+                elif parsed.path == "/api/modules/export":
+                    raw_ids = query.get("modules", [])
+                    selected: list[str] | None = None
+                    if raw_ids:
+                        selected = [item.strip() for part in raw_ids for item in part.split(",") if item.strip()]
+                    try:
+                        self._json(app.export_modules_config(selected))
+                    except ValueError as exc:
+                        self._json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
                 elif parsed.path.startswith("/api/modules/"):
                     module_id = parsed.path.rsplit("/", 1)[-1]
                     module = app.modules.get(module_id)
@@ -352,6 +361,37 @@ class AdminServer:
                     elif parsed.path == "/api/service/restart":
                         app.request_service_action("restart")
                         self._json({"ok": True, "action": "restart"})
+                    elif parsed.path == "/api/modules/export":
+                        body = self._body_json()
+                        raw_modules = body.get("modules")
+                        selected = (
+                            [str(item).strip() for item in raw_modules if str(item).strip()]
+                            if isinstance(raw_modules, list)
+                            else None
+                        )
+                        exported = app.export_modules_config(selected)
+                        self._json({"ok": True, "export": exported})
+                    elif parsed.path == "/api/modules/import":
+                        body = self._body_json(max_bytes=4 * 1024 * 1024)
+                        if isinstance(body.get("data"), dict):
+                            payload = body["data"]
+                            raw_selected = body.get("modules")
+                            selected = (
+                                [str(item).strip() for item in raw_selected if str(item).strip()]
+                                if isinstance(raw_selected, list)
+                                else None
+                            )
+                            apply_enabled = bool(body.get("apply_enabled", True))
+                        else:
+                            payload = body
+                            selected = None
+                            apply_enabled = True
+                        result = app.import_modules_config(
+                            payload,
+                            module_ids=selected,
+                            apply_enabled=apply_enabled,
+                        )
+                        self._json({"ok": True, **result})
                     elif parsed.path == "/api/modules/magnet_import/channel-scan":
                         body = self._body_json()
                         started = app.request_magnet_channel_scan(

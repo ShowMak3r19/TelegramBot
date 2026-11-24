@@ -210,7 +210,7 @@ def test_history_backfill_resumes_from_sqlite_checkpoint(tmp_path: Path) -> None
 def test_application_archives_monitored_event_before_module_dispatch(tmp_path: Path) -> None:
     config = AppConfig()
     config.chat_history.database_path = str(tmp_path / "chat-history.sqlite3")
-    app = TelegramBotApplication(config, tmp_path / "config.json")
+    app = TelegramBotApplication(config, tmp_path / "config.json", project_root=tmp_path)
     event = _event("需要长期保存的聊天", message_id=42)
 
     asyncio.run(app._on_telegram_message(event))
@@ -273,7 +273,7 @@ def test_archive_initialization_failure_does_not_block_module_dispatch(tmp_path:
     blocked_parent.write_text("占位文件", encoding="utf-8")
     config = AppConfig()
     config.chat_history.database_path = str(blocked_parent / "chat-history.sqlite3")
-    app = TelegramBotApplication(config, tmp_path / "config.json")
+    app = TelegramBotApplication(config, tmp_path / "config.json", project_root=tmp_path)
     dispatched: list[object] = []
 
     async def dispatch_message(event: object) -> list[object]:

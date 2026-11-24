@@ -429,7 +429,7 @@ def test_ai_reply_temperature_only_for_non_reasoning_model(tmp_path: Path) -> No
             reply_provider=AIProviderConfig(enabled=True, model="gpt-4o", api_key="x"),
             reply=AIReplyConfig(temperature=0.42, settings_store=str(tmp_path / "t1.json")),
         )
-        module = AIReplyModule(ModuleCard("ai_reply", "AI", "", "ai", enabled=True), non_reasoning)
+        module = AIReplyModule(ModuleCard("ai_reply", "AI", "", "ai", enabled=True), non_reasoning, project_root=tmp_path)
         asyncio.run(module._call_openai_responses_api("hi", []))
         assert captured.get("temperature") == 0.42
 
@@ -437,7 +437,7 @@ def test_ai_reply_temperature_only_for_non_reasoning_model(tmp_path: Path) -> No
             reply_provider=AIProviderConfig(enabled=True, model="gpt-5.5", api_key="x"),
             reply=AIReplyConfig(temperature=0.42, settings_store=str(tmp_path / "t2.json")),
         )
-        module2 = AIReplyModule(ModuleCard("ai_reply", "AI", "", "ai", enabled=True), reasoning)
+        module2 = AIReplyModule(ModuleCard("ai_reply", "AI", "", "ai", enabled=True), reasoning, project_root=tmp_path)
         asyncio.run(module2._call_openai_responses_api("hi", []))
         assert "temperature" not in captured
     finally:
@@ -487,7 +487,7 @@ def test_ai_reply_chat_completions_channel_uses_chat_payload(tmp_path: Path) -> 
     original = ai_reply_module.AsyncOpenAI
     try:
         ai_reply_module.AsyncOpenAI = FakeOpenAI
-        module = AIReplyModule(ModuleCard("ai_reply", "AI", "", "ai", enabled=True), config)
+        module = AIReplyModule(ModuleCard("ai_reply", "AI", "", "ai", enabled=True), config, project_root=tmp_path)
         answer, reasoning, powered_by, usage = asyncio.run(
             module._call_openai_chat_completions_api(
                 "请看图",

@@ -83,11 +83,15 @@ class AIReplyModule:
         self.usage_path = self._resolve_path("runtime/data/ai_usage.jsonl")
         self.settings_path = self._resolve_path(self.config.reply.settings_store)
         self._programmatic_message_checker: Callable[[Any], bool] | None = None
+        self._config_saver: Callable[[], None] | None = None
         self._load_ai_settings()
         self._sync_card_config()
 
     def set_programmatic_message_checker(self, checker: Callable[[Any], bool] | None) -> None:
         self._programmatic_message_checker = checker
+
+    def set_config_saver(self, saver: Callable[[], None] | None) -> None:
+        self._config_saver = saver
 
     def reload_runtime_settings(self) -> None:
         self._load_ai_settings()
@@ -630,7 +634,7 @@ class AIReplyModule:
 
         if command == "/ai_model" and value.strip():
             self.config.reply_provider.model = value.strip()
-            self._save_ai_settings()
+            self._save_ai_settings(persist_config=True)
             await safe_edit_message(message, format_ai_setting_message("对话模型", self.config.reply_provider.model), parse_mode="html")
             return True
 
@@ -793,7 +797,7 @@ class AIReplyModule:
             except (TypeError, ValueError):
                 pass
 
-    def _save_ai_settings(self) -> None:
+    def _save_ai_settings(self, *, persist_config: bool = False) -> None:
         payload = {
             "model": self.config.reply_provider.model,
             "reasoning_effort": self.config.reply.reasoning_effort,
@@ -807,6 +811,11 @@ class AIReplyModule:
             "timeout_seconds": self.config.reply.timeout_seconds,
         }
         atomic_write_text(self.settings_path, json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        if persist_config and callable(self._config_saver):
+            try:
+                self._config_saver()
+            except Exception:
+                logger.warning("Failed to persist main config after AI command update", exc_info=True)
         self._sync_card_config()
 
     def _sync_card_config(self) -> None:

@@ -148,6 +148,26 @@ def test_admin_topbar_branding_version_and_service_icon() -> None:
     assert 'document.getElementById("topbarVersion")' in app_js
 
 
+def test_admin_module_transfer_controls_present() -> None:
+    admin_static = ROOT / "telegram_bot" / "admin" / "static"
+    index_html = (admin_static / "index.html").read_text(encoding="utf-8")
+    app_js = (admin_static / "app.js").read_text(encoding="utf-8")
+
+    for dom_id in (
+        "openModuleExportBtn",
+        "openModuleImportBtn",
+        "moduleExportDialog",
+        "moduleImportDialog",
+        "moduleImportApplyEnabled",
+        "confirmModuleExportBtn",
+        "confirmModuleImportBtn",
+    ):
+        assert f'id="{dom_id}"' in index_html
+    assert '"/api/modules/export"' in app_js
+    assert '"/api/modules/import"' in app_js
+    assert "initModuleTransfer" in app_js
+
+
 def test_admin_sections_are_balanced_and_panels_belong_to_views() -> None:
     from html.parser import HTMLParser
 

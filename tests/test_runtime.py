@@ -10,7 +10,7 @@ from telegram_bot.runtime import _parse_linux_network_totals
 
 def test_status_snapshot_keeps_dashboard_history() -> None:
     with TemporaryDirectory() as tmp:
-        app = TelegramBotApplication(AppConfig(), Path(tmp) / "config.json")
+        app = TelegramBotApplication(AppConfig(), Path(tmp) / "config.json", project_root=Path(tmp))
 
         first = app.status_snapshot()
         second = app.status_snapshot()

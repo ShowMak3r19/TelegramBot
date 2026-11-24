@@ -108,9 +108,13 @@ class AIImageModule:
         self.output_dir = self._resolve_path(self.config.image.output_dir)
         self.tmp_dir = self._resolve_path("runtime/tmp")
         self.settings_path = self._resolve_path(self.config.image.settings_store)
+        self._config_saver: Any = None
         self._active_messages: set[tuple[str, str]] = set()
         self._load_image_settings()
         self._sync_card_config()
+
+    def set_config_saver(self, saver: Any) -> None:
+        self._config_saver = saver
 
     async def start(self) -> None:
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -169,7 +173,7 @@ class AIImageModule:
                 self.config.image_provider.api_key = str(provider_values["api_key"]).strip()
         self.output_dir = self._resolve_path(self.config.image.output_dir)
         self.settings_path = self._resolve_path(self.config.image.settings_store)
-        if should_save_runtime_settings:
+        if should_save_runtime_settings and self.settings_path.exists():
             self._save_image_settings()
         self._sync_card_config()
 
@@ -380,7 +384,7 @@ class AIImageModule:
                 await safe_edit_message(message, format_image_setting_message("模型", self.image_model), parse_mode="html")
                 return True
             self.config.image_provider.model = model
-            self._save_image_settings()
+            self._save_image_settings(persist_config=True)
             await safe_edit_message(message, format_image_setting_message("模型", self.image_model), parse_mode="html")
             return True
 
@@ -720,7 +724,7 @@ class AIImageModule:
         if data.get("send_mode") in {"auto", "always", "never"}:
             self.config.image.send_mode = str(data["send_mode"])
 
-    def _save_image_settings(self) -> None:
+    def _save_image_settings(self, *, persist_config: bool = False) -> None:
         payload = {
             "size": self.config.image.size,
             "ratio": self.config.image.ratio,
@@ -728,6 +732,11 @@ class AIImageModule:
             "send_mode": self.config.image.send_mode,
         }
         atomic_write_text(self.settings_path, json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        if persist_config and callable(self._config_saver):
+            try:
+                self._config_saver()
+            except Exception:
+                logger.warning("Failed to persist main config after image command update", exc_info=True)
         self._sync_card_config()
 
     def _sync_card_config(self) -> None:

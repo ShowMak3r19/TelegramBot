@@ -2260,6 +2260,196 @@ kbd,
   flex-wrap: wrap;
 }
 
+.hub-transfer-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+}
+
+.transfer-dialog {
+  width: min(46rem, calc(100vw - 2rem));
+}
+
+.transfer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.transfer-bar-actions,
+.transfer-foot-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.transfer-group-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.transfer-group-head {
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin-bottom: 0.42rem;
+}
+
+.transfer-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+@media (max-width: 640px) {
+  .transfer-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.transfer-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.58rem 0.72rem;
+  border-radius: 0.85rem;
+  border: 1px solid var(--border);
+  background: var(--surface-recessed);
+  cursor: pointer;
+  transition: border-color 150ms var(--ease-out), background 150ms var(--ease-out);
+}
+
+.transfer-item:hover {
+  border-color: var(--accent-border);
+  background: var(--surface-hover);
+}
+
+.transfer-item input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  accent-color: var(--accent);
+}
+
+.transfer-item-ico {
+  width: 1.65rem;
+  height: 1.65rem;
+  border-radius: 0.52rem;
+  display: grid;
+  place-items: center;
+  background: var(--accent-soft);
+  color: var(--accent);
+  flex: none;
+}
+
+.transfer-item-ico svg {
+  width: 0.95rem;
+  height: 0.95rem;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.85;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.transfer-item-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.transfer-item-copy strong {
+  font-size: 0.86rem;
+  font-weight: 650;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.transfer-item-copy small {
+  font-size: 0.73rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.transfer-dropzone {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.95rem 1.05rem;
+  border-radius: 0.95rem;
+  border: 1px dashed var(--border-strong);
+  background: var(--surface-recessed);
+  cursor: pointer;
+  transition: border-color 160ms var(--ease-out), background 160ms var(--ease-out);
+}
+
+.transfer-dropzone:hover,
+.transfer-dropzone.is-dragover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.transfer-dropzone-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.16rem;
+}
+
+.transfer-dropzone-copy strong {
+  font-size: 0.88rem;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transfer-dropzone-copy small {
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+
+.transfer-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.transfer-toggle-row {
+  padding: 0.65rem 0.85rem;
+  border-radius: 0.85rem;
+  border: 1px solid var(--border);
+  background: var(--surface-recessed);
+}
+
+.transfer-safety-note {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.transfer-error {
+  padding: 0.7rem 0.9rem;
+  border-radius: 0.78rem;
+  border: 1px solid var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
 .segmented-bar {
   display: inline-flex;
   align-items: center;

@@ -84,6 +84,8 @@ const ICONS = {
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   logout: '<path d="M10 17l5-5-5-5"/><path d="M15 12H4"/><path d="M14 4h5a1.5 1.5 0 0 1 1.5 1.5v13A1.5 1.5 0 0 1 19 20h-5"/>',
   power: '<path d="M12 3v8"/><path d="M6.6 6.6a8 8 0 1 0 10.8 0"/>',
+  download: '<path d="M12 4v11"/><path d="m7.5 11.5 4.5 4.5 4.5-4.5"/><path d="M5 19h14"/>',
+  upload: '<path d="M12 16V5"/><path d="m7.5 9.5 4.5-4.5 4.5 4.5"/><path d="M5 19h14"/>',
   palette: '<circle cx="12" cy="12" r="9"/><circle cx="9" cy="10" r="1.2"/><circle cx="12.5" cy="8" r="1.2"/><circle cx="16" cy="10.5" r="1.2"/><path d="M15 15.5a2 2 0 0 1 2 2 2.5 2.5 0 0 1-2.5 2.5"/>',
   arrange: '<rect x="3" y="4" width="7" height="7" rx="1.5"/><rect x="14" y="4" width="7" height="7" rx="1.5"/><rect x="3" y="13" width="7" height="7" rx="1.5"/><path d="M14 16.5h7M17.5 13v7"/>',
   spark: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>',
@@ -4189,6 +4191,327 @@ function initWorkspaceEnhancements() {
       }
     })
     .catch(() => {});
+
+  initModuleTransfer();
+}
+
+const MODULE_TRANSFER_CATEGORY_ORDER = ["interactive", "ai", "media", "sync"];
+
+function initModuleTransfer() {
+  const exportDialog = document.getElementById("moduleExportDialog");
+  const importDialog = document.getElementById("moduleImportDialog");
+  if (!exportDialog || !importDialog) return;
+
+  const exportList = document.getElementById("moduleExportList");
+  const exportSummary = document.getElementById("moduleExportSummary");
+  const exportConfirmBtn = document.getElementById("confirmModuleExportBtn");
+
+  const importFileInput = document.getElementById("moduleImportFileInput");
+  const importDropzone = document.getElementById("moduleImportDropzone");
+  const importFileLabel = document.getElementById("moduleImportFileLabel");
+  const importFileMeta = document.getElementById("moduleImportFileMeta");
+  const importPreview = document.getElementById("moduleImportPreview");
+  const importList = document.getElementById("moduleImportList");
+  const importSummary = document.getElementById("moduleImportSummary");
+  const importApplyEnabled = document.getElementById("moduleImportApplyEnabled");
+  const importError = document.getElementById("moduleImportError");
+  const importConfirmBtn = document.getElementById("confirmModuleImportBtn");
+
+  const transferState = {
+    importPayload: null,
+    importMatchedIds: [],
+  };
+
+  function closeDialog(kind) {
+    const dlg = kind === "export" ? exportDialog : importDialog;
+    dlg.classList.add("hidden");
+    document.body.classList.remove("modal-open");
+  }
+
+  function renderTransferGroups(container, items, checkboxName) {
+    const byCat = new Map();
+    MODULE_TRANSFER_CATEGORY_ORDER.forEach((cat) => byCat.set(cat, []));
+    items.forEach((item) => {
+      const cat = MODULE_CATEGORY_KEYS[item.id] || "sync";
+      if (!byCat.has(cat)) byCat.set(cat, []);
+      byCat.get(cat).push(item);
+    });
+    const html = [];
+    byCat.forEach((list, cat) => {
+      if (!list.length) return;
+      const catLabel = CATEGORY_LABELS[cat] || "其他模块";
+      html.push(`
+        <div class="transfer-group">
+          <div class="transfer-group-head">${escapeHtml(catLabel)}</div>
+          <div class="transfer-grid">
+            ${list.map((item) => `
+              <label class="transfer-item">
+                <input type="checkbox" name="${checkboxName}" value="${escapeAttr(item.id)}" ${item.checked ? "checked" : ""} />
+                <span class="transfer-item-ico">${iconSvg(moduleIcon(item.id))}</span>
+                <span class="transfer-item-copy">
+                  <strong>${escapeHtml(item.name)}</strong>
+                  <small>${escapeHtml(item.meta || "")}</small>
+                </span>
+                <span class="tag ${item.badgeClass || ""}">${escapeHtml(item.badgeText || "")}</span>
+              </label>
+            `).join("")}
+          </div>
+        </div>
+      `);
+    });
+    container.innerHTML = html.join("");
+  }
+
+  function selectedIdsIn(container) {
+    return Array.from(container.querySelectorAll('input[type="checkbox"]:checked')).map((el) => el.value);
+  }
+
+  function updateExportSelectionState() {
+    const total = exportList.querySelectorAll('input[type="checkbox"]').length;
+    const count = selectedIdsIn(exportList).length;
+    exportSummary.textContent = `已选 ${count} / ${total} 个模块`;
+    exportConfirmBtn.disabled = count === 0;
+  }
+
+  function updateImportSelectionState() {
+    const total = importList.querySelectorAll('input[type="checkbox"]').length;
+    const count = selectedIdsIn(importList).length;
+    importSummary.textContent = `已选 ${count} / ${total} 个模块`;
+    importConfirmBtn.disabled = !transferState.importPayload || count === 0;
+  }
+
+  function openExportDialog() {
+    const modules = Array.isArray(state.modules) ? state.modules : [];
+    const items = modules.map((mod) => ({
+      id: mod.id,
+      name: mod.name || mod.id,
+      meta: mod.id,
+      checked: true,
+      badgeText: mod.enabled ? "已启用" : "未启用",
+      badgeClass: mod.enabled ? "enabled" : "disabled",
+    }));
+    renderTransferGroups(exportList, items, "export_module");
+    updateExportSelectionState();
+    exportDialog.classList.remove("hidden");
+  }
+
+  function resetImportDialog() {
+    transferState.importPayload = null;
+    transferState.importMatchedIds = [];
+    importFileInput.value = "";
+    importFileLabel.textContent = "点击选择或拖入功能模块配置 JSON 文件";
+    importFileMeta.textContent = "仅读取功能模块配置，任何非模块配置项都会自动忽略";
+    importPreview.classList.add("hidden");
+    importList.innerHTML = "";
+    importError.textContent = "";
+    importError.classList.add("hidden");
+    importApplyEnabled.checked = true;
+    importConfirmBtn.disabled = true;
+  }
+
+  function showImportError(message) {
+    transferState.importPayload = null;
+    transferState.importMatchedIds = [];
+    importPreview.classList.add("hidden");
+    importError.textContent = message;
+    importError.classList.remove("hidden");
+    importConfirmBtn.disabled = true;
+  }
+
+  function handleImportFile(file) {
+    if (!file) return;
+    if (file.size > 4 * 1024 * 1024) {
+      showImportError("文件体积超过 4 MB 限制，请选择有效的功能模块配置 JSON 文件。");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result || ""));
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          showImportError("文件内容不是合法的 JSON 对象。");
+          return;
+        }
+        if (parsed.format && parsed.format !== "telebot-modules-config") {
+          showImportError("不支持的配置文件格式，请选择通过“导出配置”生成的 JSON 文件。");
+          return;
+        }
+        const rawModules = parsed.modules;
+        if (!rawModules || typeof rawModules !== "object" || Array.isArray(rawModules)) {
+          showImportError("配置文件缺少有效的 modules 字段。");
+          return;
+        }
+        const registeredById = new Map((state.modules || []).map((mod) => [mod.id, mod]));
+        const matched = [];
+        const ignoredKeys = [];
+        Object.entries(rawModules).forEach(([id, entry]) => {
+          const registered = registeredById.get(id);
+          if (!registered || !entry || typeof entry !== "object") {
+            ignoredKeys.push(id);
+            return;
+          }
+          const hasEnabled = typeof entry.enabled === "boolean";
+          matched.push({
+            id,
+            name: registered.name || entry.name || id,
+            meta: hasEnabled
+              ? `当前${registered.enabled ? "已启用" : "未启用"} → 导入${entry.enabled ? "启用" : "停用"}`
+              : `当前${registered.enabled ? "已启用" : "未启用"}`,
+            checked: true,
+            badgeText: hasEnabled ? (entry.enabled ? "启用" : "停用") : "仅参数",
+            badgeClass: hasEnabled ? (entry.enabled ? "enabled" : "disabled") : "",
+          });
+        });
+        if (!matched.length) {
+          showImportError("文件中未包含任何当前支持的功能模块配置。");
+          return;
+        }
+        transferState.importPayload = parsed;
+        transferState.importMatchedIds = matched.map((item) => item.id);
+        importFileLabel.textContent = file.name;
+        const metaParts = [`识别 ${matched.length} 个功能模块`];
+        if (parsed.exported_at) metaParts.push(`导出于 ${String(parsed.exported_at).replace("T", " ")}`);
+        if (ignoredKeys.length) metaParts.push(`已自动忽略 ${ignoredKeys.length} 项非模块/不支持键`);
+        importFileMeta.textContent = metaParts.join(" · ");
+        importError.classList.add("hidden");
+        renderTransferGroups(importList, matched, "import_module");
+        importPreview.classList.remove("hidden");
+        updateImportSelectionState();
+      } catch (err) {
+        showImportError(`JSON 解析失败：${err.message}`);
+      }
+    };
+    reader.onerror = () => showImportError("读取文件失败，请重试。");
+    reader.readAsText(file, "utf-8");
+  }
+
+  document.getElementById("openModuleExportBtn")?.addEventListener("click", openExportDialog);
+  document.getElementById("openModuleImportBtn")?.addEventListener("click", () => {
+    resetImportDialog();
+    importDialog.classList.remove("hidden");
+  });
+
+  document.querySelectorAll("[data-close-transfer]").forEach((el) => {
+    el.addEventListener("click", () => closeDialog(el.dataset.closeTransfer));
+  });
+
+  exportList.addEventListener("change", updateExportSelectionState);
+  importList.addEventListener("change", updateImportSelectionState);
+
+  document.getElementById("moduleExportSelectAll")?.addEventListener("click", () => {
+    exportList.querySelectorAll('input[type="checkbox"]').forEach((el) => { el.checked = true; });
+    updateExportSelectionState();
+  });
+  document.getElementById("moduleExportSelectEnabled")?.addEventListener("click", () => {
+    const enabledSet = new Set((state.modules || []).filter((m) => m.enabled).map((m) => m.id));
+    exportList.querySelectorAll('input[type="checkbox"]').forEach((el) => {
+      el.checked = enabledSet.has(el.value);
+    });
+    updateExportSelectionState();
+  });
+  document.getElementById("moduleExportSelectNone")?.addEventListener("click", () => {
+    exportList.querySelectorAll('input[type="checkbox"]').forEach((el) => { el.checked = false; });
+    updateExportSelectionState();
+  });
+
+  document.getElementById("moduleImportSelectAll")?.addEventListener("click", () => {
+    importList.querySelectorAll('input[type="checkbox"]').forEach((el) => { el.checked = true; });
+    updateImportSelectionState();
+  });
+  document.getElementById("moduleImportSelectNone")?.addEventListener("click", () => {
+    importList.querySelectorAll('input[type="checkbox"]').forEach((el) => { el.checked = false; });
+    updateImportSelectionState();
+  });
+
+  const triggerPick = () => importFileInput.click();
+  document.getElementById("moduleImportPickBtn")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    triggerPick();
+  });
+  importDropzone?.addEventListener("click", triggerPick);
+  importDropzone?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      triggerPick();
+    }
+  });
+  importDropzone?.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    importDropzone.classList.add("is-dragover");
+  });
+  importDropzone?.addEventListener("dragleave", () => {
+    importDropzone.classList.remove("is-dragover");
+  });
+  importDropzone?.addEventListener("drop", (event) => {
+    event.preventDefault();
+    importDropzone.classList.remove("is-dragover");
+    const file = event.dataTransfer?.files?.[0];
+    if (file) handleImportFile(file);
+  });
+  importFileInput?.addEventListener("change", () => {
+    const file = importFileInput.files?.[0];
+    if (file) handleImportFile(file);
+  });
+
+  exportConfirmBtn?.addEventListener("click", async () => {
+    const selected = selectedIdsIn(exportList);
+    if (!selected.length) return;
+    exportConfirmBtn.disabled = true;
+    try {
+      const result = await postJson("/api/modules/export", { modules: selected });
+      const bundle = result.export || result;
+      const now = new Date();
+      const pad = (n) => String(n).padStart(2, "0");
+      const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+      const blob = new Blob([JSON.stringify(bundle, null, 2) + "\n"], { type: "application/json;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `telebot-modules-${stamp}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      closeDialog("export");
+      showToast(`已导出 ${selected.length} 个功能模块配置`, "success");
+    } catch (error) {
+      showToast(`导出失败：${error.message}`, "error");
+    } finally {
+      updateExportSelectionState();
+    }
+  });
+
+  importConfirmBtn?.addEventListener("click", async () => {
+    const selected = selectedIdsIn(importList);
+    if (!transferState.importPayload || !selected.length) return;
+    importConfirmBtn.disabled = true;
+    try {
+      const result = await postJson("/api/modules/import", {
+        data: transferState.importPayload,
+        modules: selected,
+        apply_enabled: Boolean(importApplyEnabled.checked),
+      });
+      if (Array.isArray(result.modules)) {
+        state.modules = result.modules;
+        updateModulesOverview(state.modules);
+        renderModuleCards();
+      }
+      await Promise.allSettled([refreshModules(), refreshAi(), refreshStatus()]);
+      closeDialog("import");
+      const importedCount = Array.isArray(result.imported) ? result.imported.length : selected.length;
+      showToast(`已导入 ${importedCount} 个功能模块配置（系统配置与 AI 服务未改动）`, "success");
+    } catch (error) {
+      showImportError(`导入失败：${error.message}`);
+    } finally {
+      updateImportSelectionState();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    if (!exportDialog.classList.contains("hidden")) closeDialog("export");
+    if (!importDialog.classList.contains("hidden")) closeDialog("import");
+  });
 }
 
 initWorkspaceEnhancements();
