@@ -70,7 +70,7 @@ def make_message(*, name="x1080x_all_2026-10-09.csv", username="example_sender",
     )
 
 
-def make_module(tmp_path: Path, importer=None, **overrides) -> MagnetImportModule:
+def make_module(tmp_path: Path, importer=None, posts_importer=None, **overrides) -> MagnetImportModule:
     overrides.setdefault("watch_chats", [str(CHAT_ID)])
     overrides.setdefault("sender_usernames", ["example_sender"])
     overrides.setdefault("channel_source_site", "sample")
@@ -85,6 +85,7 @@ def make_module(tmp_path: Path, importer=None, **overrides) -> MagnetImportModul
         config,
         tmp_path,
         importer=importer or FakeImporter(),
+        posts_importer=posts_importer or FakeImporter(),
         sleep=fake_sleep,
     )
     module.sleeps = sleeps
@@ -486,3 +487,163 @@ def test_auto_import_rejects_bad_csv_without_reply_or_upload(tmp_path: Path) -> 
     assert module.card.metrics["last"]["status"] == "failed"
     assert "没有可导入的行" in module.card.metrics["last"]["detail"]
     assert list((tmp_path / "runtime/tmp/magnet_import").iterdir()) == []
+
+
+# ---- 色花综合帖子 CSV（/api/posts/import）----
+
+from telegram_bot.shared.magnetboard_api import POST_CSV_COLUMNS, import_posts_csv_sync
+
+
+def test_normalize_posts_csv_aligns_20_columns_dedupes_and_skips_ltx_rehash(tmp_path: Path) -> None:
+    """旧版/乱序/含 BOM 的色花综合帖子 CSV 标准化为精确 20 列，按 tid 优先、original_url 兜底去重。"""
+    src, dest = tmp_path / "posts_in.csv", tmp_path / "posts_out.csv"
+    # 模拟旧版导出：缺少 is_downloaded/images/attachments，列顺序不同，带额外未知列
+    header = ["board_name", "title", "original_url", "tid", "magnet_link", "extra_col"]
+    rows = [
+        ["综合讨论区", "无磁力纯图帖", "https://example.com/thread-1001-1-1.html", "1001", "", "x"],
+        ["综合讨论区", "同 tid 重复", "https://example.com/thread-1001-2-1.html", "1001", "", "x"],
+        ["综合讨论区", "多行 ed2k 帖", "https://example.com/thread-1002-1-1.html", "1002", f"{ED2K_C}\n{BTIH_A}", "x"],
+        ["综合讨论区", "无 tid 按链接去重", "https://example.com/thread-1003-1-1.html", "", BTIH_B, "x"],
+        ["综合讨论区", "无 tid 重复链接", "https://example.com/thread-1003-1-1.html", "", "", "x"],
+        ["综合讨论区", "", "https://example.com/thread-1004-1-1.html", "1004", "", "x"],  # 缺标题
+        ["综合讨论区", "缺原帖链接", "", "1005", "", "x"],  # 缺 original_url
+        ["综合讨论区", "列数不符"],  # 列数不符
+        ["", "", "", "", "", ""],  # 空行
+    ]
+    src.write_bytes(_csv_bytes(header, rows, bom=True))
+
+    # 默认 allow_posts=False（自动监听）必须拒绝
+    try:
+        normalize_import_csv(src, dest, frozenset({"ltx"}))
+    except CsvFormatError as exc:
+        assert "色花综合帖子" in str(exc)
+    else:
+        raise AssertionError("posts csv should be rejected when allow_posts=False")
+
+    # allow_posts=True（手动 /import）通过，且不会触发 ltx rehash
+    result = normalize_import_csv(src, dest, frozenset({"ltx"}), allow_posts=True)
+    assert result.kind == "posts"
+    assert (result.total, result.written, result.duplicates, result.rehashed) == (8, 3, 2, 0)
+    assert dict(result.bad) == {"title": 1, "original_url": 1, "columns": 1}
+    assert result.unknown_columns == ["extra_col"]
+    assert not dest.read_bytes().startswith(b"\xef\xbb\xbf")
+
+    with dest.open(encoding="utf-8", newline="") as fh:
+        reader = _csv.reader(fh)
+        out_header = next(reader)
+        out_rows = [dict(zip(out_header, row)) for row in reader]
+    assert out_header == POST_CSV_COLUMNS
+    assert [row["title"] for row in out_rows] == ["无磁力纯图帖", "多行 ed2k 帖", "无 tid 按链接去重"]
+    assert out_rows[0]["magnet_link"] == ""
+    assert out_rows[0]["is_downloaded"] == "false"
+    assert out_rows[0]["images"] == "[]"
+    assert out_rows[0]["attachments"] == "[]"
+    assert out_rows[1]["magnet_link"] == f"{ED2K_C}\n{BTIH_A}"
+
+
+def test_manual_import_routes_posts_csv_to_posts_endpoint_with_add_only(tmp_path: Path) -> None:
+    content = _csv_bytes(
+        ["id", "title", "tid", "original_url", "board_name", "magnet_link"],
+        [
+            ["1", "综合帖 A", "3931274", "https://example.com/thread-3931274-1-1.html", "综合讨论区", ""],
+            ["2", "综合帖 A 重复", "3931274", "https://example.com/thread-3931274-1-2.html", "综合讨论区", ""],
+            ["3", "综合帖 B", "3932163", "https://example.com/thread-3932163-1-1.html", "综合讨论区", ED2K_C],
+        ],
+    )
+    magnet_importer = FakeImporter()
+    posts_importer = FakeImporter(
+        result={
+            "success": True,
+            "data": {"total_records": 2, "posts_imported": 1, "posts_updated": 0, "posts_skipped": 1, "errors": []},
+        }
+    )
+    # 即使后台开启了 update_existing=True，帖子导入也必须强制 merge_strategy="add"
+    module = make_module(tmp_path, importer=magnet_importer, posts_importer=posts_importer, update_existing=True)
+    replied = make_message(name="posts_data_incremental_2026-11-23.csv", username="example_sender", message_id=96716, size=len(content))
+    client = FakeClient(content)
+    command = _command(replied)
+
+    result = asyncio.run(_dispatch(module, command, client))
+
+    assert result.status == "handled"
+    assert magnet_importer.calls == []  # 绝不进入磁力主表 /api/data/import
+    assert len(posts_importer.calls) == 1
+    call = posts_importer.calls[0]
+    assert call["merge_strategy"] == "add"
+    assert call["validate_data"] is True
+    with _io.StringIO(call["content"].decode("utf-8")) as buf:
+        reader = _csv.reader(buf)
+        assert next(reader) == POST_CSV_COLUMNS
+        assert len(list(reader)) == 2
+    final = command.edits[-1]
+    assert final.startswith("✅ 已导入 色花综合帖子 posts_data_incremental_2026-11-23.csv")
+    assert "文件内重复 1 行" in final
+    assert "新增 1，跳过 1，更新 0，错误 0" in final
+    assert list((tmp_path / "runtime/tmp/magnet_import").iterdir()) == []
+
+
+def test_auto_import_rejects_posts_csv_even_when_filename_matches(tmp_path: Path) -> None:
+    content = _csv_bytes(
+        ["title", "tid", "original_url", "board_name", "magnet_link"],
+        [["综合帖", "3931274", "https://example.com/thread-3931274-1-1.html", "综合讨论区", ""]],
+    )
+    magnet_importer = FakeImporter()
+    posts_importer = FakeImporter()
+    module = make_module(
+        tmp_path,
+        importer=magnet_importer,
+        posts_importer=posts_importer,
+        file_name_pattern=r"^posts_data.*\.csv$",
+    )
+    client = FakeClient(content)
+
+    msg = make_message(name="posts_data_incremental_2026-11-23.csv", message_id=96716, size=len(content))
+    asyncio.run(_dispatch(module, msg, client))
+
+    assert magnet_importer.calls == []
+    assert posts_importer.calls == []
+    assert client.sent == []
+    assert module.card.metrics["last"]["status"] == "failed"
+    assert "色花综合帖子" in module.card.metrics["last"]["detail"]
+    assert list((tmp_path / "runtime/tmp/magnet_import").iterdir()) == []
+
+
+def test_import_posts_csv_sync_uses_query_params_and_posts_endpoint(tmp_path: Path, monkeypatch) -> None:
+    import httpx
+
+    recorded: list[dict[str, object]] = []
+
+    class DummyResp:
+        def __init__(self, status_code: int, payload: dict[str, object]) -> None:
+            self.status_code = status_code
+            self._payload = payload
+            self.text = json.dumps(payload)
+
+        def json(self):
+            return self._payload
+
+    class DummyClient:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, url, **kwargs):
+            recorded.append({"url": url, "params": kwargs.get("params"), "has_file": "file" in (kwargs.get("files") or {})})
+            if url.endswith("/api/auth/login"):
+                return DummyResp(200, {"success": True})
+            return DummyResp(200, {"success": True, "data": {"posts_imported": 3, "posts_skipped": 1, "errors": []}})
+
+    monkeypatch.setattr(httpx, "Client", DummyClient)
+    csv_path = tmp_path / "posts.csv"
+    csv_path.write_text(",".join(POST_CSV_COLUMNS) + "\n", encoding="utf-8")
+
+    payload = import_posts_csv_sync("http://127.0.0.1:8022/", "admin", "pw", csv_path, "posts_data.csv")
+    assert payload["data"]["posts_imported"] == 3
+    assert recorded[1]["url"] == "http://127.0.0.1:8022/api/posts/import"
+    assert recorded[1]["params"] == {"merge_strategy": "add", "validate_data": "true"}
+    assert recorded[1]["has_file"] is True

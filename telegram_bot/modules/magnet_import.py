@@ -19,6 +19,7 @@ from telegram_bot.shared.magnetboard_api import (
     enrich_images_sync,
     export_csv_sync,
     import_csv_sync,
+    import_posts_csv_sync,
     summarize_import_result,
 )
 from telegram_bot.shared.magnet_csv import CsvFormatError, normalize_import_csv
@@ -54,6 +55,7 @@ class MagnetImportModule:
         project_root: Path | None = None,
         *,
         importer: Importer = import_csv_sync,
+        posts_importer: Importer = import_posts_csv_sync,
         enricher: Callable[..., dict[str, int]] = enrich_images_sync,
         exporter: Callable[..., str] = export_csv_sync,
         deleter: Callable[..., int] = delete_source_records_sync,
@@ -65,6 +67,7 @@ class MagnetImportModule:
         self.config = config
         self.project_root = project_root or Path.cwd()
         self._importer = importer
+        self._posts_importer = posts_importer
         self._sleep = sleep
         self._lock = asyncio.Lock()
         self._tasks: set[asyncio.Task] = set()
@@ -331,39 +334,64 @@ class MagnetImportModule:
                     )
                     await safe_edit_message(status, f"⏳ 正在导入 {name}：格式校对中…", parse_mode=None)
                     try:
-                        check = await asyncio.to_thread(normalize_import_csv, dest, clean, self._hash_sources())
+                        check = await asyncio.to_thread(
+                            normalize_import_csv, dest, clean, self._hash_sources(), allow_posts=True
+                        )
                     except CsvFormatError as exc:
+                        logger.warning("Magnet manual import format check failed for %s: %s", name, exc)
                         self._set_last(name, "failed", f"格式校对未通过：{exc}")
                         await self._notify(client, status, message, f"❌ {name} 格式校对未通过：{exc}")
                         return
-                    logger.info("Magnet manual import checked %s: %s", name, check.describe())
+                    logger.info("Magnet manual import checked %s (kind=%s): %s", name, check.kind, check.describe())
                     if check.written == 0:
                         self._set_last(name, "failed", f"没有可导入的行：{check.describe()}")
                         await self._notify(client, status, message, f"❌ {name} 没有可导入的行\n校对：{check.describe()}")
                         return
 
                     self._set_last(name, "importing", "")
-                    await safe_edit_message(
-                        status, f"⏳ 正在导入 {name}：上传到 MagnetBoard…\n校对：{check.describe()}", parse_mode=None
-                    )
-                    payload = await asyncio.to_thread(
-                        self._importer,
-                        self.config.api_base_url,
-                        self.config.api_username,
-                        self.config.api_password,
-                        clean,
-                        name,
-                        update_existing=self.config.update_existing,
-                        skip_duplicates=True,  # 与库内重复交给 MagnetBoard 按 url 跳过
-                        timeout=self.config.import_timeout_seconds,
-                    )
+                    if check.kind == "posts":
+                        await safe_edit_message(
+                            status,
+                            f"⏳ 正在导入色花综合帖子 {name}：上传到 MagnetBoard（仅新增不覆盖）…\n校对：{check.describe()}",
+                            parse_mode=None,
+                        )
+                        payload = await asyncio.to_thread(
+                            self._posts_importer,
+                            self.config.api_base_url,
+                            self.config.api_username,
+                            self.config.api_password,
+                            clean,
+                            name,
+                            merge_strategy="add",
+                            validate_data=True,
+                            timeout=self.config.import_timeout_seconds,
+                        )
+                    else:
+                        await safe_edit_message(
+                            status, f"⏳ 正在导入 {name}：上传到 MagnetBoard…\n校对：{check.describe()}", parse_mode=None
+                        )
+                        payload = await asyncio.to_thread(
+                            self._importer,
+                            self.config.api_base_url,
+                            self.config.api_username,
+                            self.config.api_password,
+                            clean,
+                            name,
+                            update_existing=self.config.update_existing,
+                            skip_duplicates=True,  # 与库内重复交给 MagnetBoard 按 url 跳过
+                            timeout=self.config.import_timeout_seconds,
+                        )
                     summary = summarize_import_result(payload)
-                    logger.info("Magnet manual import finished %s: %s", name, summary)
+                    logger.info("Magnet manual import finished %s (kind=%s): %s", name, check.kind, summary)
                     self._record(f"{key}:manual", name, "imported", summary)
                 finally:
                     _remove_temp_files(dest, dest.with_name(dest.name + ".part"), clean)
+            target_prefix = "色花综合帖子 " if check.kind == "posts" else ""
             await self._notify(
-                client, status, message, f"✅ 已导入 {name}\n校对：{check.describe()}\n导入：{_import_stats_text(payload)}"
+                client,
+                status,
+                message,
+                f"✅ 已导入 {target_prefix}{name}\n校对：{check.describe()}\n导入：{_import_stats_text(payload)}",
             )
         except asyncio.CancelledError:
             self._set_last(name, "cancelled", "服务停止，任务已取消")
@@ -511,13 +539,19 @@ class MagnetImportModule:
 def _import_stats_text(payload: dict[str, Any]) -> str:
     data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
     parts = [
-        ("新增", "imported_records"),
-        ("跳过", "skipped_records"),
-        ("更新", "updated_records"),
-        ("错误", "error_records"),
+        ("新增", ("imported_records", "posts_imported")),
+        ("跳过", ("skipped_records", "posts_skipped")),
+        ("更新", ("updated_records", "posts_updated")),
+        ("错误", ("error_records", "errors")),
     ]
-    text = "，".join(f"{label} {data[key]}" for label, key in parts if key in data)
-    return text or summarize_import_result(payload)
+    items: list[str] = []
+    for label, keys in parts:
+        for key in keys:
+            if key in data:
+                val = len(data[key]) if isinstance(data[key], list) else data[key]
+                items.append(f"{label} {val}")
+                break
+    return "，".join(items) or summarize_import_result(payload)
 
 
 async def _refetch(client: Any, message: Any) -> Any:

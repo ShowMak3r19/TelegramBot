@@ -1,4 +1,9 @@
-"""手动导入前的 CSV 校对：按 MagnetBoard 导出格式检查表头、丢坏行、文件内去重，再写成标准格式。"""
+"""导入前的 CSV 校对：按 MagnetBoard 导出格式检查表头、丢坏行、文件内去重，再写成标准格式。
+
+支持两类互斥格式：
+- magnets（磁力主表）：用于自动监听与手动 /import，导入 /api/data/import。
+- posts（色花综合帖子）：仅在 allow_posts=True（手动 /import）时允许，标准化为精确 20 列，导入 /api/posts/import。
+"""
 
 from __future__ import annotations
 
@@ -10,7 +15,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from telegram_bot.shared.magnet_post_parser import link_hashes, normalize_magnet_hash
-from telegram_bot.shared.magnetboard_api import CSV_COLUMNS, write_import_csv
+from telegram_bot.shared.magnetboard_api import CSV_COLUMNS, POST_CSV_COLUMNS, write_import_csv, write_posts_csv
 
 # 去重依据与 MagnetBoard 一致：url，或（url 为空时）magnet_hash + source_site，所以两者至少要有一列
 REQUIRED_COLUMNS = ("title", "magnets")
@@ -19,11 +24,30 @@ DEDUPE_COLUMNS = ("url", "magnet_hash")
 EXTRA_COLUMNS = ("forum_name", "import_identity")
 KNOWN_COLUMNS = (*CSV_COLUMNS, *EXTRA_COLUMNS)
 
+# 色花综合帖子表（posts）判别规则：含 title + original_url + 至少一个帖子专属列，且不含磁力主表专属列
+POST_REQUIRED_COLUMNS = ("title", "original_url")
+POST_MARKER_COLUMNS = frozenset({
+    "tid",
+    "board_name",
+    "board_id",
+    "type_id",
+    "type_name",
+    "magnet_link",
+    "preview_image",
+    "attachments",
+    "is_read",
+    "is_locked",
+    "subscription_id",
+})
+MAGNET_EXCLUSIVE_COLUMNS = frozenset({"magnets", "source_site", "magnet_hash"})
+KNOWN_POST_COLUMNS = tuple(POST_CSV_COLUMNS)
+
 BAD_REASONS = {
     "columns": "列数不符",
     "title": "缺标题",
     "magnets": "磁力格式错误",
     "no_link": "无磁力/链接",
+    "original_url": "缺原帖链接",
 }
 
 
@@ -33,6 +57,7 @@ class CsvFormatError(ValueError):
 
 @dataclass
 class CsvCheckResult:
+    kind: str = "magnets"
     total: int = 0
     written: int = 0
     duplicates: int = 0
@@ -57,10 +82,17 @@ class CsvCheckResult:
         return text
 
 
-def normalize_import_csv(src: Path, dest: Path, hash_sources: frozenset[str] = frozenset()) -> CsvCheckResult:
+def normalize_import_csv(
+    src: Path,
+    dest: Path,
+    hash_sources: frozenset[str] = frozenset(),
+    *,
+    allow_posts: bool = False,
+) -> CsvCheckResult:
     """校对 src 并把有效、去重后的行按导出格式写到 dest（无 BOM）。表头不合格抛 CsvFormatError。
 
     hash_sources 内来源的行，magnet_hash 改为 momo 口径的文件 MD4（第三方导出常填消息号/资源编号）。
+    allow_posts=True 时同时识别色花综合帖子 CSV（posts），并规范化为 /api/posts/import 要求的精确 20 列。
     """
     csv.field_size_limit(2**31 - 1)  # 帖子正文可能很长
     result = CsvCheckResult()
@@ -72,26 +104,44 @@ def normalize_import_csv(src: Path, dest: Path, hash_sources: frozenset[str] = f
             raise CsvFormatError("文件是空的") from None
         except UnicodeDecodeError:
             raise CsvFormatError("不是 UTF-8 编码") from None
-        _check_header(header, result)
-        columns = [*CSV_COLUMNS, *(name for name in EXTRA_COLUMNS if name in header)]
+        kind = _check_header(header, result, allow_posts=allow_posts)
         try:
-            result.written = write_import_csv(_clean_rows(reader, header, result, hash_sources), dest, columns)
+            if kind == "posts":
+                result.written = write_posts_csv(_clean_post_rows(reader, header, result), dest)
+            else:
+                columns = [*CSV_COLUMNS, *(name for name in EXTRA_COLUMNS if name in header)]
+                result.written = write_import_csv(_clean_rows(reader, header, result, hash_sources), dest, columns)
         except UnicodeDecodeError:
             raise CsvFormatError("不是 UTF-8 编码") from None
     return result
 
 
-def _check_header(header: list[str], result: CsvCheckResult) -> None:
+def _check_header(header: list[str], result: CsvCheckResult, *, allow_posts: bool = False) -> str:
     columns = set(header)
+    if len(columns) != len(header):
+        raise CsvFormatError("表头有重复列名")
+    is_posts = (
+        all(name in columns for name in POST_REQUIRED_COLUMNS)
+        and bool(columns & POST_MARKER_COLUMNS)
+        and not (columns & MAGNET_EXCLUSIVE_COLUMNS)
+    )
+    if is_posts:
+        if not allow_posts:
+            raise CsvFormatError("检测到色花综合帖子格式，自动监听仅支持磁力主表 CSV，请使用手动 /import 导入")
+        result.kind = "posts"
+        known = set(KNOWN_POST_COLUMNS)
+        result.unknown_columns = [name for name in header if name not in known]
+        return "posts"
     missing = [name for name in REQUIRED_COLUMNS if name not in columns]
     if not columns & set(DEDUPE_COLUMNS):
         missing.append(" 或 ".join(DEDUPE_COLUMNS))
     if missing:
-        raise CsvFormatError(f"缺少必需列：{', '.join(missing)}（需为 MagnetBoard 导出格式）")
-    if len(columns) != len(header):
-        raise CsvFormatError("表头有重复列名")
+        expected = "MagnetBoard 磁力或色花综合帖子导出格式" if allow_posts else "MagnetBoard 导出格式"
+        raise CsvFormatError(f"缺少必需列：{', '.join(missing)}（需为{expected}）")
+    result.kind = "magnets"
     known = set(KNOWN_COLUMNS)
     result.unknown_columns = [name for name in header if name not in known]
+    return "magnets"
 
 
 def _clean_rows(
@@ -160,3 +210,47 @@ def _dedupe_key(row: dict[str, str], links: list[str]) -> str:
     if row.get("magnet_hash"):
         return f"mh:{row.get('source_site', '')}:{row['magnet_hash']}"
     return "links:" + "|".join(sorted(link_hashes("\n".join(links)) or links))
+
+
+def _clean_post_rows(reader: Any, header: list[str], result: CsvCheckResult) -> Iterator[dict[str, Any]]:
+    known = set(KNOWN_POST_COLUMNS)
+    seen: set[str] = set()
+    for values in reader:
+        if not any(value.strip() for value in values):
+            continue  # 空行不计数
+        result.total += 1
+        if len(values) != len(header):
+            result.bad["columns"] += 1
+            continue
+        row = {name: value.strip() for name, value in zip(header, values) if name in known}
+        if not row.get("title"):
+            result.bad["title"] += 1
+            continue
+        if not row.get("original_url"):
+            result.bad["original_url"] += 1
+            continue
+        key = _post_dedupe_key(row)
+        if key in seen:
+            result.duplicates += 1
+            continue
+        seen.add(key)
+        # 空字符串交给 write_posts_csv 补默认值（如 images/attachments/bool），其余保留原值
+        yield {k: v for k, v in row.items() if v != ""}
+
+
+def _post_dedupe_key(row: dict[str, str]) -> str:
+    """与 MagnetBoard /api/posts/import 一致：tid（整数）优先，original_url 兜底去重。"""
+    tid = _parse_int_str(row.get("tid", ""))
+    if tid is not None:
+        return f"tid:{tid}"
+    return f"url:{row['original_url']}"
+
+
+def _parse_int_str(value: str) -> str | None:
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        return str(int(text))
+    except ValueError:
+        return None

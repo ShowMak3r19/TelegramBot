@@ -32,6 +32,20 @@ CSV_COLUMNS = (
 ).split(",")
 _CSV_DEFAULTS = {"images": "[]", "is_uncensored": "False", "subtitles": "False", "is_downloaded": "False"}
 
+# 与 /api/posts/export 导出的表头一致；/api/posts/import 使用 PostgreSQL COPY，要求严格按这 20 列顺序提供
+POST_CSV_COLUMNS = (
+    "id,title,tid,original_url,board_name,board_id,type_id,type_name,author,author_id,"
+    "published_at,preview_image,images,magnet_link,attachments,is_read,is_locked,"
+    "is_downloaded,subscription_id,created_at"
+).split(",")
+_POST_CSV_DEFAULTS = {
+    "images": "[]",
+    "attachments": "[]",
+    "is_read": "false",
+    "is_locked": "false",
+    "is_downloaded": "false",
+}
+
 
 def write_import_csv(rows: Iterable[dict[str, Any]], path: Path, columns: list[str] | None = None) -> int:
     """按 MagnetBoard 导出格式写 CSV，未给出的列用默认值/留空，返回行数。columns 默认为 CSV_COLUMNS。"""
@@ -43,6 +57,22 @@ def write_import_csv(rows: Iterable[dict[str, Any]], path: Path, columns: list[s
             data = {**_CSV_DEFAULTS, **row}
             for key in ("magnets", "images", "tags"):
                 if isinstance(data.get(key), list):
+                    data[key] = json.dumps(data[key], ensure_ascii=False)
+            writer.writerow(data)
+            count += 1
+    return count
+
+
+def write_posts_csv(rows: Iterable[dict[str, Any]], path: Path) -> int:
+    """按 MagnetBoard 色花综合帖子导出格式（严格 20 列）写 CSV，返回行数。"""
+    count = 0
+    with Path(path).open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=POST_CSV_COLUMNS, extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            data = {**_POST_CSV_DEFAULTS, **row}
+            for key in ("images", "attachments"):
+                if isinstance(data.get(key), (list, dict)):
                     data[key] = json.dumps(data[key], ensure_ascii=False)
             writer.writerow(data)
             count += 1
@@ -81,6 +111,42 @@ def import_csv_sync(
         payload = _json_or_empty(response)
         if response.status_code >= 400 or payload.get("success") is False:
             raise MagnetBoardError(f"MagnetBoard 导入失败（{response.status_code}）：{_error_text(payload, response)}")
+        return payload
+
+
+def import_posts_csv_sync(
+    base_url: str,
+    username: str,
+    password: str,
+    file_path: Path,
+    file_name: str,
+    *,
+    merge_strategy: str = "add",
+    validate_data: bool = True,
+    timeout: float = 1800.0,
+) -> dict[str, Any]:
+    """同步登录并上传色花综合帖子 CSV（POST /api/posts/import），写入独立 posts 表。请在 asyncio.to_thread 中调用。"""
+    import httpx
+
+    base = ensure_http_url(base_url).rstrip("/")
+    client_timeout = httpx.Timeout(timeout, connect=15.0)
+    with httpx.Client(timeout=client_timeout, follow_redirects=False) as client:
+        headers = _login(client, base, username, password)
+        with Path(file_path).open("rb") as fh:
+            response = client.post(
+                f"{base}/api/posts/import",
+                params={
+                    "merge_strategy": merge_strategy,
+                    "validate_data": "true" if validate_data else "false",
+                },
+                headers=headers,
+                files={"file": (file_name, fh, "text/csv")},
+            )
+        payload = _json_or_empty(response)
+        if response.status_code >= 400 or payload.get("success") is False:
+            raise MagnetBoardError(
+                f"MagnetBoard 帖子导入失败（{response.status_code}）：{_error_text(payload, response)}"
+            )
         return payload
 
 
