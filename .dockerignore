@@ -12,6 +12,7 @@ __pycache__
 config.json
 config.json.*
 config.*.json
+!config.example.json
 config/
 .env
 .env.*
