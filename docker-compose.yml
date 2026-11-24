@@ -8,7 +8,9 @@
 
 services:
   telebot:
-    build: .
+    image: ghcr.io/showmak3r19/telegrambot:latest
+    # 如需本地自行构建镜像，可注释上面 image 并取消下行注释：
+    # build: .
     container_name: telebot
     restart: unless-stopped
     ports:
@@ -26,7 +28,7 @@ services:
       # HTTP_PROXY: http://127.0.0.1:7890
       # HTTPS_PROXY: http://127.0.0.1:7890
     volumes:
-      # 使用目录挂载，避免容器内原子保存 config.json 触发文件忙错误
+      # 使用目录挂载，首次启动自动生成 config/config.json，避免原子保存触发文件占用错误
       - ./config:/app/config
       - ./sessions:/app/sessions
       - ./runtime:/app/runtime

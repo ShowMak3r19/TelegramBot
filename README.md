@@ -25,33 +25,61 @@
 
 所有功能模块默认关闭，配置后按需启用。部分指令要求由当前登录账号发送；具体触发词及参数可在后台查看和修改。
 
-## Docker 部署（推荐）
+## Docker Compose 部署（推荐，免编译直拉镜像）
 
-仓库提供 `Dockerfile` 与 `docker-compose.yml`（预装 Python 3.11、FFmpeg、Tesseract OCR 以及中文/Emoji 字体），默认通过目录挂载 `./config:/app/config`、`./sessions:/app/sessions` 与 `./runtime:/app/runtime` 持久化数据。
+镜像通过 GitHub Actions 自动构建并发布至 GitHub Container Registry（支持 `linux/amd64` 与 `linux/arm64`，内置 Python 3.11、FFmpeg、Tesseract OCR 与中文/Emoji 字体）：
 
-```bash
-git clone https://github.com/ShowMak3r19/TelegramBot.git
-cd TelegramBot
-mkdir -p config sessions runtime
-cp config.example.json config/config.json
+```text
+ghcr.io/showmak3r19/telegrambot:latest
 ```
 
-编辑 `config/config.json`，填入你自己的 Telegram `api_id`、`api_hash`（按需填写 `bot_token`）与监听群组并将 `telegram.enabled` 设为 `true`；AI 功能需另行填写模型服务地址、模型名与 API Key。
+无需克隆源码，在任意空目录新建 `docker-compose.yml`（或直接下载本仓库的 `docker-compose.yml`）：
 
-首次使用 Telegram 用户账号登录时，请先用交互式终端启动一次完成手机号/验证码/两步验证登录（已有 `sessions/*.session` 可跳过）：
+```yaml
+services:
+  telebot:
+    image: ghcr.io/showmak3r19/telegrambot:latest
+    container_name: telebot
+    restart: unless-stopped
+    ports:
+      - "8088:8088"
+    environment:
+      TZ: Asia/Shanghai
+      TGBOT_CONFIG: /app/config/config.json
+      TGBOT_ADMIN_HOST: 0.0.0.0
+      TGBOT_ADMIN_PORT: 8088
+    volumes:
+      - ./config:/app/config
+      - ./sessions:/app/sessions
+      - ./runtime:/app/runtime
+```
+
+1. 启动容器（首次启动会自动在 `./config/config.json` 生成默认配置）：
 
 ```bash
+docker compose up -d
+```
+
+2. 在**内网**打开 `http://<宿主机或NAS内网IP>:8088`（或编辑 `./config/config.json`），填入你自己的 Telegram `api_id`、`api_hash`（按需填写 `bot_token`）与监听群组；AI 功能需另行填写模型服务地址、模型名与 API Key。
+3. 首次使用 Telegram 用户账号登录时，请用交互式终端运行一次完成手机号/验证码/两步验证登录（已有 `sessions/*.session` 可跳过）：
+
+```bash
+docker compose stop telebot
 docker compose run --rm -it telebot
-# 登录成功并生成 sessions/*.session 后按 Ctrl+C 退出
+# 登录成功并生成 sessions/*.session 后按 Ctrl+C 退出，再恢复后台运行：
+docker compose up -d
 ```
 
-随后以守护模式启动：
+日常更新与维护：
 
 ```bash
-docker compose up -d --build
+# 拉取最新镜像并重建容器
+docker compose pull && docker compose up -d
+# 查看日志
+docker compose logs -f telebot
 ```
 
-启动后在**内网**打开 `http://<宿主机或NAS内网IP>:8088`（默认映射 `8088:8088`；如仅限本机访问，可将 `docker-compose.yml` 的端口改为 `127.0.0.1:8088:8088`）。更多容器维护与代理参数见 [部署说明](docs/deployment.md)。
+默认映射 `8088:8088`（如仅限本机访问，可将端口改为 `127.0.0.1:8088:8088`）。更多容器参数与本地自行构建说明见 [部署说明](docs/deployment.md)。
 
 > ⚠️ **再次提醒**：Docker 默认配置**无登录鉴权**，仅适合自己内网使用，切勿将端口暴露到公网；出现任何问题一概不负责。
 

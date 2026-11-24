@@ -1,5 +1,9 @@
 FROM python:3.11-slim
 
+LABEL org.opencontainers.image.source="https://github.com/ShowMak3r19/TelegramBot" \
+      org.opencontainers.image.title="Telebot" \
+      org.opencontainers.image.description="Telebot - Modular Telegram Bot & Web Console"
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
