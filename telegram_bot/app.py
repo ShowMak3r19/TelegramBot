@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, TypeVar
 
+from . import __version__
 from .admin import AdminServer
 from .config import AIProviderConfig, AppConfig
 from .jobs import ChatHistoryBackfillJob
@@ -107,7 +108,7 @@ class TelegramBotApplication:
             ],
         )
         self.recent_logs = configure_logging(self.config.logs, self.project_root)
-        logger.info("Starting %s %s", self.config.project_name, self.config.version)
+        logger.info("Starting %s %s", self.config.project_name, __version__)
         self.admin.start()
         await self.start_service()
         stop_event = asyncio.Event()
@@ -211,7 +212,7 @@ class TelegramBotApplication:
         return {
             "project": {
                 "name": self.config.project_name,
-                "version": self.config.version,
+                "version": __version__,
                 "config_path": str(self.config_path),
                 "root": str(self.project_root),
             },
@@ -483,7 +484,7 @@ class TelegramBotApplication:
             "exported_at": datetime.now().astimezone().isoformat(timespec="seconds"),
             "project": {
                 "name": self.config.project_name,
-                "version": self.config.version,
+                "version": __version__,
             },
             "excluded": [
                 "admin",

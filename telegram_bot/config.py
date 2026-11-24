@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
+from telegram_bot import __version__
 from telegram_bot.shared.telegram_io import atomic_write_text
 
 
@@ -486,7 +487,7 @@ class AIConfig:
 @dataclass
 class AppConfig:
     project_name: str = "Telebot"
-    version: str = "0.1.0"
+    version: str = __version__
     admin: AdminConfig = field(default_factory=AdminConfig)
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     logs: LogConfig = field(default_factory=LogConfig)

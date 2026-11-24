@@ -144,3 +144,23 @@ def test_user_profile_defaults_include_fx_all_aliases() -> None:
     assert ".fx" in config.user_profile.command_prefixes
     assert "毒舌" in config.user_profile.style_prompt
     assert "适度夸张" in config.user_profile.style_prompt
+
+
+def test_runtime_version_ignores_stale_config_version_and_matches_changelog(tmp_path: Path) -> None:
+    from telegram_bot import __version__
+    from telegram_bot.app import TelegramBotApplication
+
+    config = AppConfig.from_dict({"version": "0.0.1-stale"})
+    assert AppConfig().version == __version__
+
+    app = TelegramBotApplication(config, tmp_path / "config.json", project_root=tmp_path)
+    try:
+        assert app.status_snapshot()["project"]["version"] == __version__
+        exported = app.export_modules_config(["user_profile"])
+        assert exported["project"]["version"] == __version__
+    finally:
+        app.chat_history.close()
+
+    changelog_path = Path(__file__).resolve().parents[1] / "CHANGELOG.md"
+    assert changelog_path.is_file()
+    assert f"v{__version__}" in changelog_path.read_text(encoding="utf-8")
