@@ -49,56 +49,60 @@ const CHART_WINDOWS = {
   all: Infinity,
 };
 
-const ICON_ASSET_VERSION = "1.1.0";
-
-const CUSTOM_ICON_ASSETS = {
-  dashboard: "dashboard.png",
-  modules: "modules.png",
-  arrange: "arrange.png",
-  settings: "settings.png",
-  aiServices: "ai_services.png",
-  aiUsage: "ai_usage.png",
-  logs: "logs.png",
-  palette: "palette.png",
-  red_packet: "red_packet.png",
-  send_red_packet: "send_red_packet.png",
-  chat_games: "chat_games.png",
-  command: "command.png",
-  ai_reply: "ai_reply.png",
-  user_profile: "user_profile.png",
-  ai_image: "ai_image.png",
-  ai_decrypt: "ai_decrypt.png",
-  gif: "gif.png",
-  word_cloud: "word_cloud.png",
-  quote: "quote.png",
-  checkin: "checkin.png",
-  auto_forward: "auto_forward.png",
-  magnet_import: "magnet_import.png",
-  rex_widget_sync: "rex_widget_sync.png",
-  spark: "spark.png",
+// 24 core menu & feature module icons: minimal 2-3 shape flat-duotone geometric SVG badges
+const BADGE_ICONS = {
+  dashboard:
+    '<rect class="ico-solid" x="3.5" y="3.5" width="7.5" height="9.5" rx="2.2"/><rect class="ico-soft" x="13" y="3.5" width="7.5" height="5.5" rx="2.2"/><rect class="ico-soft" x="3.5" y="15" width="7.5" height="5.5" rx="2.2"/><rect class="ico-solid" x="13" y="11" width="7.5" height="9.5" rx="2.2"/>',
+  modules:
+    '<rect class="ico-soft" x="3.5" y="3.5" width="7.4" height="7.4" rx="2.1"/><rect class="ico-soft" x="3.5" y="13.1" width="7.4" height="7.4" rx="2.1"/><rect class="ico-soft" x="13.1" y="13.1" width="7.4" height="7.4" rx="2.1"/><rect class="ico-solid" x="13.1" y="3.5" width="7.4" height="7.4" rx="2.1" transform="rotate(11 16.8 7.2)"/>',
+  arrange:
+    '<rect class="ico-soft" x="4" y="4.6" width="13.2" height="3.8" rx="1.9"/><rect class="ico-solid" x="6.8" y="10.1" width="13.2" height="3.8" rx="1.9"/><rect class="ico-soft" x="4" y="15.6" width="13.2" height="3.8" rx="1.9"/>',
+  settings:
+    '<path class="ico-soft" d="M10.4 3.4h3.2l.65 2.05c.58.18 1.12.46 1.62.82l1.95-.82 2.26 2.26-.82 1.95c.36.5.64 1.04.82 1.62l2.05.65v3.2l-2.05.65c-.18.58-.46 1.12-.82 1.62l.82 1.95-2.26 2.26-1.95-.82c-.5.36-1.04.64-1.62.82l-.65 2.05h-3.2l-.65-2.05c-.58-.18-1.12-.46-1.62-.82l-1.95.82-2.26-2.26.82-1.95c-.36-.5-.64-1.04-.82-1.62l-2.05-.65v-3.2l2.05-.65c.18-.58.46-1.12.82-1.62l-.82-1.95 2.26-2.26 1.95.82c.5-.36 1.04-.64 1.62-.82z" transform="translate(12 12) scale(0.86) translate(-12 -12)"/><circle class="ico-solid" cx="12" cy="12" r="3.4"/>',
+  aiServices:
+    '<path class="ico-solid" d="M10.5 3.6c.42 4.1 2.38 6.08 6.5 6.5-4.12.42-6.08 2.4-6.5 6.5-.42-4.1-2.38-6.08-6.5-6.5 4.12-.42 6.08-2.4 6.5-6.5z"/><path class="ico-soft" d="M17.8 13.6c.25 2.05 1.15 2.95 3.2 3.2-2.05.25-2.95 1.15-3.2 3.2-.25-2.05-1.15-2.95-3.2-3.2 2.05-.25 2.95-1.15 3.2-3.2z"/>',
+  aiUsage:
+    '<rect class="ico-soft" x="4" y="13" width="4.2" height="7" rx="2"/><rect class="ico-soft" x="9.9" y="9" width="4.2" height="11" rx="2"/><rect class="ico-solid" x="15.8" y="4.5" width="4.2" height="15.5" rx="2"/>',
+  logs:
+    '<rect class="ico-soft" x="3.5" y="4.5" width="17" height="15" rx="3.4"/><path class="ico-line" d="M8 9.6l3 2.4-3 2.4"/><path class="ico-line" d="M13 14.5h3.5"/>',
+  palette:
+    '<path class="ico-soft" d="M12 3.6a8.4 8.4 0 1 0 0 16.8h1.35a2 2 0 0 0 1.45-3.45 1.85 1.85 0 0 1 1.35-3.1h1.55a2.5 2.5 0 0 0 2.7-2.5A8.4 8.4 0 0 0 12 3.6z"/><circle class="ico-solid" cx="8.2" cy="11.2" r="1.5"/><circle class="ico-solid" cx="11.6" cy="8.2" r="1.5"/><circle class="ico-solid" cx="15.6" cy="9.4" r="1.5"/>',
+  red_packet:
+    '<rect class="ico-soft" x="5" y="3.4" width="14" height="17.2" rx="3"/><path class="ico-line" d="M5.6 8.3c3.8 2.6 9 2.6 12.8 0"/><circle class="ico-solid" cx="12" cy="11.5" r="2.7"/>',
+  send_red_packet:
+    '<rect class="ico-soft" x="4.5" y="10.2" width="15" height="10.2" rx="2.6"/><path class="ico-line" d="M5.2 11.6L12 15.4l6.8-3.8"/><path class="ico-line" d="M12 10.2V4m0 0L8.8 7.2M12 4l3.2 3.2"/>',
+  chat_games:
+    '<rect class="ico-soft" x="3.2" y="6.8" width="17.6" height="10.8" rx="5.2"/><path class="ico-line" d="M8.5 10.2v4M6.5 12.2h4"/><circle class="ico-solid" cx="15.2" cy="11.1" r="1.3"/><circle class="ico-solid" cx="17.5" cy="13.4" r="1.3"/>',
+  ai_reply:
+    '<path class="ico-soft" d="M5.6 4.8h12.8A2.6 2.6 0 0 1 21 7.4v8a2.6 2.6 0 0 1-2.6 2.6H10l-4.1 2.7a.6.6 0 0 1-.95-.48V18A2.6 2.6 0 0 1 3 15.4v-8a2.6 2.6 0 0 1 2.6-2.6z"/><path class="ico-solid" d="M12 7.4c.3 2.5 1.5 3.7 4 4-2.5.3-3.7 1.5-4 4-.3-2.5-1.5-3.7-4-4 2.5-.3 3.7-1.5 4-4z"/>',
+  user_profile:
+    '<circle class="ico-solid" cx="10.4" cy="8.2" r="3.4"/><path class="ico-soft" d="M4.1 19.6c.7-3.4 3.1-5.4 6.3-5.4s5.6 2 6.3 5.4a1.2 1.2 0 0 1-1.18 1.4H5.28a1.2 1.2 0 0 1-1.18-1.4z"/><path class="ico-solid" d="M18.2 4.2c.22 1.6.98 2.38 2.6 2.6-1.62.22-2.38.98-2.6 2.6-.22-1.62-.98-2.38-2.6-2.6 1.62-.22 2.38-.98 2.6-2.6z"/>',
+  ai_image:
+    '<rect class="ico-soft" x="3.5" y="4.5" width="17" height="15" rx="3.4"/><path class="ico-solid" d="M5.5 17.5l4.4-5.2a1.2 1.2 0 0 1 1.85.05l2.1 2.55 1.4-1.6a1.1 1.1 0 0 1 1.7.06l1.55 1.94a1.4 1.4 0 0 1-1.1 2.2H5.5z"/><circle class="ico-solid" cx="15.8" cy="8.8" r="1.75"/>',
+  ai_decrypt:
+    '<path class="ico-line" d="M8.5 10.2V7.8a3.5 3.5 0 0 1 6.7-1.4"/><rect class="ico-soft" x="5" y="10.2" width="14" height="10" rx="3"/><circle class="ico-solid" cx="12" cy="14.6" r="1.6"/><path class="ico-line" d="M12 15.6v2"/>',
+  gif:
+    '<rect class="ico-soft" x="3.5" y="5" width="17" height="14" rx="3.5"/><path class="ico-solid" d="M10.4 8.9a1 1 0 0 1 1.5-.86l5 3.1a1 1 0 0 1 0 1.72l-5 3.1a1 1 0 0 1-1.5-.86z"/><path class="ico-line" d="M6.9 9.2v5.6"/>',
+  word_cloud:
+    '<path class="ico-soft" d="M7.2 18.5h10a4 4 0 0 0 .65-7.95 5.4 5.4 0 0 0-10.3-1.4A4.4 4.4 0 0 0 7.2 18.5z"/><rect class="ico-solid" x="7.4" y="11.2" width="7.2" height="2.2" rx="1.1"/><rect class="ico-solid" x="10.2" y="14.6" width="6.2" height="2.1" rx="1.05"/>',
+  quote:
+    '<rect class="ico-soft" x="3.5" y="4" width="17" height="16" rx="4"/><path class="ico-solid" d="M7.5 12.2V9.8a1.3 1.3 0 0 1 1.3-1.3h1.6a1.3 1.3 0 0 1 1.3 1.3v2.7c0 1.9-1.1 3.3-2.9 3.8l-.6-1.3c1-.4 1.5-1.1 1.6-2h-1a1.3 1.3 0 0 1-1.3-1.3zm5.8 0V9.8a1.3 1.3 0 0 1 1.3-1.3h1.6a1.3 1.3 0 0 1 1.3 1.3v2.7c0 1.9-1.1 3.3-2.9 3.8l-.6-1.3c1-.4 1.5-1.1 1.6-2h-1a1.3 1.3 0 0 1-1.3-1.3z"/>',
+  checkin:
+    '<rect class="ico-soft" x="4" y="5.8" width="16" height="14.4" rx="3.2"/><path class="ico-line" d="M8.5 3.8v3M15.5 3.8v3"/><path class="ico-line" d="M8.6 13.4l2.4 2.4 4.8-5.2"/>',
+  auto_forward:
+    '<path class="ico-soft" d="M4.2 12.2l15-6.8a.85.85 0 0 1 1.18 1.02l-3.6 12.4a.85.85 0 0 1-1.44.34l-3.1-3.3-3.6 1.7a.65.65 0 0 1-.92-.68l.45-3-3.97-1.18a.75.75 0 0 1 0-1.4z"/><path class="ico-line" d="M10.4 14.2L19 6.6"/>',
+  magnet_import:
+    '<path class="ico-soft" d="M6 5.2v6a6 6 0 0 0 12 0v-6h-3.6v6a2.4 2.4 0 0 1-4.8 0v-6z"/><rect class="ico-solid" x="6" y="4.5" width="3.6" height="3.2" rx="1"/><rect class="ico-solid" x="14.4" y="4.5" width="3.6" height="3.2" rx="1"/>',
+  rex_widget_sync:
+    '<rect class="ico-soft" x="4" y="4.2" width="9.2" height="9.2" rx="2.4"/><rect class="ico-solid" x="10.8" y="10.6" width="9.2" height="9.2" rx="2.4"/><path class="ico-line" d="M16 5.4a4.5 4.5 0 0 1 3.4 3.4M8 18.6a4.5 4.5 0 0 1-3.4-3.4"/>',
+  command:
+    '<rect class="ico-soft" x="9" y="9" width="6" height="6" rx="1"/><path class="ico-line" d="M18 3.6a2.6 2.6 0 0 0-2.6 2.6v11.6a2.6 2.6 0 1 0 2.6-2.6H6a2.6 2.6 0 1 0 2.6 2.6V6.2A2.6 2.6 0 1 0 6 8.8h12a2.6 2.6 0 0 0 0-5.2z"/>',
+  spark:
+    '<path class="ico-solid" d="M12 3.5c.45 4.4 2.6 6.55 7 7-4.4.45-6.55 2.6-7 7-.45-4.4-2.6-6.55-7-7 4.4-.45 6.55-2.6 7-7z"/>',
 };
 
 const ICONS = {
-  dashboard: '<rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="11" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="17" width="7" height="3" rx="1.5"/>',
-  modules: '<path d="M5 4h6l2 3h6v13H5z"/><path d="M8 11h8M8 15h5"/>',
-  red_packet: '<path d="M6 7h12v13H6z"/><path d="M6 10h12"/><path d="m9 7 3-3 3 3"/><circle cx="12" cy="14" r="2.5"/>',
-  send_red_packet: '<path d="M5 8h14v11H5z"/><path d="M5 11h14"/><path d="M12 8V5"/><path d="m9 5 3-3 3 3"/><path d="M9 15h6"/><path d="M12 13v4"/>',
-  ai_reply: '<path d="M5 6h14v9H9l-4 4z"/><path d="M9 10h6M9 13h4"/><circle cx="17" cy="7" r="2"/>',
-  user_profile: '<circle cx="10" cy="8" r="3"/><path d="M4.5 18c.8-3.2 2.7-4.8 5.5-4.8s4.7 1.6 5.5 4.8"/><path d="m18 5 .7 1.8L20.5 7.5l-1.8.7L18 10l-.7-1.8-1.8-.7 1.8-.7z"/>',
-  ai_image: '<rect x="4" y="5" width="16" height="14" rx="3"/><circle cx="15.5" cy="9.5" r="1.7"/><path d="m6.5 16 4-4 3 3 2-2 2.5 3"/>',
-  ai_decrypt: '<path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="5" y="10" width="14" height="10" rx="3"/><path d="M12 14v3"/><path d="M9 4.8 7.5 3.3M15 4.8l1.5-1.5M12 3V1.5"/>',
-  gif: '<rect x="4" y="5" width="16" height="14" rx="3"/><path d="M9 10v4h2.5M14 10v4M17 10h-2v4"/>',
-  word_cloud: '<path d="M7 17.5h10a4 4 0 0 0 .7-7.9A5.5 5.5 0 0 0 7.1 8.2 4.8 4.8 0 0 0 7 17.5z"/><path d="M8 13h8M9.5 10.5h5M10.5 15.5h3"/>',
-  checkin: '<path d="M7 4v4M17 4v4"/><rect x="4" y="6" width="16" height="14" rx="3"/><path d="M8 13l3 3 5-6"/>',
-  auto_forward: '<path d="M5 7h8a5 5 0 0 1 5 5v1"/><path d="m15 10 3 3 3-3"/><path d="M19 17H8a3 3 0 0 1-3-3v-1"/><path d="m8 10-3 3 3 3"/>',
-  rex_widget_sync: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M17.5 14v7"/><path d="m14.5 18 3 3 3-3"/>',
-  magnet_import: '<path d="M7 4v7a5 5 0 0 0 10 0V4"/><path d="M7 4h3v7a2 2 0 0 0 4 0V4h3"/><path d="M12 17v4"/><path d="m9 19 3 3 3-3"/>',
-  quote: '<path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9l-4 4z"/><path d="M8.5 9.5h2v3h-2zM13.5 9.5h2v3h-2z"/>',
-  chat_games: '<path d="M7 9h10a4 4 0 0 1 3.8 5.3l-.7 2.1a2.2 2.2 0 0 1-3.7.8L14.8 16H9.2l-1.6 1.2a2.2 2.2 0 0 1-3.7-.8l-.7-2.1A4 4 0 0 1 7 9z"/><path d="M8 12v3M6.5 13.5h3M15.5 12.5h.01M18 14.5h.01"/>',
-  aiServices: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 3v3M17.5 4.5h3M5 17v2.5M3.75 18.25h2.5"/>',
-  aiUsage: '<path d="M5 19V5"/><path d="M5 19h15"/><path d="M8 15l3-4 3 2 4-6"/><circle cx="11" cy="11" r="1.5"/><circle cx="18" cy="7" r="1.5"/>',
-  logs: '<path d="M6 4h12v16H6z"/><path d="M9 8h6M9 12h6M9 16h4"/>',
-  settings: '<circle cx="12" cy="12" r="3"/><path d="M12 4v2M12 18v2M4 12h2M18 12h2M6.3 6.3l1.4 1.4M16.3 16.3l1.4 1.4M17.7 6.3l-1.4 1.4M7.7 16.3l-1.4 1.4"/>',
+  ...BADGE_ICONS,
   chevronUp: '<path d="m6 15 6-6 6 6"/>',
   chevronDown: '<path d="m6 9 6 6 6-6"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2.5 12h2M19.5 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
@@ -113,10 +117,6 @@ const ICONS = {
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   logout: '<path d="M10 17l5-5-5-5"/><path d="M15 12H4"/><path d="M14 4h5a1.5 1.5 0 0 1 1.5 1.5v13A1.5 1.5 0 0 1 19 20h-5"/>',
   power: '<path d="M12 3v8"/><path d="M6.6 6.6a8 8 0 1 0 10.8 0"/>',
-  palette: '<circle cx="12" cy="12" r="9"/><circle cx="9" cy="10" r="1.2"/><circle cx="12.5" cy="8" r="1.2"/><circle cx="16" cy="10.5" r="1.2"/><path d="M15 15.5a2 2 0 0 1 2 2 2.5 2.5 0 0 1-2.5 2.5"/>',
-  arrange: '<rect x="3" y="4" width="7" height="7" rx="1.5"/><rect x="14" y="4" width="7" height="7" rx="1.5"/><rect x="3" y="13" width="7" height="7" rx="1.5"/><path d="M14 16.5h7M17.5 13v7"/>',
-  spark: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>',
-  command: '<path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/>',
   upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>',
   edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
   trash: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/>',
@@ -526,12 +526,10 @@ function moduleIconKey(moduleId) {
 }
 
 function iconSvg(name) {
-  const asset = CUSTOM_ICON_ASSETS[name];
-  if (asset) {
-    return `<img class="ui-icon-img" src="/assets/icons/${asset}?v=${ICON_ASSET_VERSION}" alt="" decoding="async" draggable="false" />`;
-  }
+  const isBadge = Object.prototype.hasOwnProperty.call(BADGE_ICONS, name);
   const body = ICONS[name] || ICONS.modules;
-  return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${body}</svg>`;
+  const cls = isBadge ? ' class="ui-badge-svg"' : "";
+  return `<svg${cls} viewBox="0 0 24 24" aria-hidden="true" focusable="false">${body}</svg>`;
 }
 
 function prepareView(viewId) {
@@ -696,7 +694,7 @@ function renderDashboardKpis(data) {
   if (sidebarDot) sidebarDot.className = `pulse-dot ${connected ? "online" : "offline"}`;
   if (sidebarState) sidebarState.textContent = connected ? "Telegram 已连接" : "Telegram 未连接";
   if (topbarVersion) {
-    const versionText = project.version ? `v${project.version}` : "v1.1.0";
+    const versionText = project.version ? `v${project.version}` : "v1.1.1";
     topbarVersion.textContent = versionText;
     topbarVersion.title = `${project.name || "Telebot"} ${versionText}`;
   }
