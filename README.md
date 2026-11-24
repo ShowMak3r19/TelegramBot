@@ -52,6 +52,8 @@ services:
       - ./config:/app/config
       - ./sessions:/app/sessions
       - ./runtime:/app/runtime
+      # 可选：如需启用 AVDB GitHub 资源包自动转换，取消下行注释并将转换脚本放到 ./scripts/avdb/resource_to_csv.sh
+      # - ./scripts:/app/scripts:ro
 ```
 
 1. 启动容器（首次启动会自动在 `./config/config.json` 生成默认配置）：
