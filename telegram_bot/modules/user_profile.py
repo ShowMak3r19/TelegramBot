@@ -41,32 +41,66 @@ from telegram_bot.shared.telegram_io import (
 )
 
 from .base import ModuleCard
+from .user_profile_analytics import (
+    ProfileAnalytics,
+    compute_profile_analytics,
+    filter_noise_samples,
+    format_analytics_display_lines,
+    format_analytics_for_prompt,
+    format_sample_time_tag,
+    select_informative_samples,
+    with_resolved_peer_labels,
+)
 
 logger = logging.getLogger(__name__)
 
 PROFILE_SYSTEM_PROMPT = """
-你是 Telegram 群聊行为观察员。你只能根据用户给出的消息样本，总结这个人在该群聊中呈现的发言风格和群聊人设。
-这是娱乐性的有限样本观察，不是心理评估。不得推断健康、疾病、宗教、政治立场、性取向、族裔、财务状况、精确位置、犯罪倾向等敏感属性，不使用诊断性标签。
-不得编造原话、消息 ID、人际关系或样本外事实。结论要使用“从这些发言看”的语气，不要把局部表现写成永久人格。
+你是 Telegram 群聊行为观察员，擅长从客观行为数据与真实发言中抓住一个人最鲜明的独特性、反差和群聊生态位。
+安全边界：这是基于有限群聊样本的娱乐性观察，不是心理评估。不得推断健康、疾病、宗教、政治立场、性取向、族裔、财务状况、精确位置、犯罪倾向等敏感属性，不使用诊断性标签；不得编造原话、消息 ID、人际关系或样本外事实。
+区分度铁律（极其重要）：
+1. 必须通过“遮名测试”：如果把名字遮住，某句评价套到群里另一个普通群友身上也成立，就删掉重写！
+2. 严禁万金油算命套话：禁止泛泛使用“表面高冷实则话痨”“隐形气氛组”“隐藏大佬”“嘴硬心软”“存在感强”“热爱生活/分享”“幽默风趣”“佛系”等空洞标签，除非紧跟无法替代的具体反差证据。
+3. 必须结合【本地客观行为指纹】中的具体数据（作息、字数与群内百分位、回复/提问习惯、专属高频词、口头禅、互动搭子、跨群或跨时期反差），把数字和真实原话融进观察里。
+4. 兴趣话题必须写到具体细分点（具体作品/工具/梗/习惯），禁止只写“日常闲聊”“科技数码”等空泛大类。
+5. 评分必须依据行为指纹锚点拉开 1-5 星梯度，低于群平均就老实给 1-2 星，极端突出才给 5 星，禁止全员 4-5 星。
+仅输出一个 JSON 对象，不要 Markdown、HTML、代码块或额外说明。
+""".strip()
+
+PROFILE_EXTRACT_SYSTEM_PROMPT = """
+你是客观的群聊语料事实提取员。任务是从这一批消息中挖掘该用户最独特、最具体、可验证的行为线索与高能名场面，供后续全局画像汇总。
+不要写空泛的人设评价或套话，要尽量保留具体名词、高频口头禅、互动姿态、争议/反差点以及最有辨识度的原话 message_id。
+安全边界：不得推断健康、疾病、宗教、政治立场、性取向、族裔、财务状况、精确位置、犯罪倾向等敏感属性，不得编造不存在的 message_id 或样本外事实。
 仅输出一个 JSON 对象，不要 Markdown、HTML、代码块或额外说明。
 """.strip()
 
 _JSON_SCHEMA = {
-    "tagline": "一句话摘要",
+    "archetype": "6-16字专属群聊生态位称号（基于具体行为/作息/反差，拒绝泛泛外号）",
+    "tagline": "一句话精准灵魂摘要（点破此人最独特的反差或执念）",
     "personality": [
-        {"title": "俏皮的小标题", "analysis": "有样本依据的分析", "evidence_ids": [123]},
+        {"title": "有区分度的小标题", "analysis": "结合行为数据/专属词/具体例子的分析", "evidence_ids": [123]},
     ],
-    "interests": [{"topic": "话题", "detail": "样本中的表现"}],
-    "quotes": [{"message_id": 123, "comment": "这句话体现了什么"}],
-    "ratings": [{"dimension": "群聊表现维度", "score": 4, "comment": "一句简短点评"}],
-    "verdict": ["简短总评要点"],
-    "closing": "一句轻松收尾",
+    "interests": [{"topic": "具体细分话题/执念", "detail": "样本中的具体表现与态度"}],
+    "quotes": [{"message_id": 123, "comment": "这句话为什么只有他会说/体现了什么反差"}],
+    "ratings": [{"dimension": "有对比意义的维度", "score": 2, "comment": "结合数据锚点的简短点评"}],
+    "verdict": ["可验证的独特规律、反差或跨群/跨时期变化"],
+    "closing": "一句精准、好笑且不套路的收尾",
 }
 
-_PROFILE_PROMPT_PAYLOAD_MAX_CHARS = 100_000
+_CHUNK_EXTRACT_SCHEMA = {
+    "period": "本批时间范围简述",
+    "habits": ["本批观察到的具体说话习惯/口头禅/句式特点（带具体例子）"],
+    "topics": [{"topic": "具体细分话题/名词/作品/工具", "stance": "他的具体态度、偏好或做过什么"}],
+    "moments": [{"message_id": 123, "why": "为什么有辨识度、好笑或体现反差"}],
+    "social_style": "本批与其他群友的互动姿态（如爱抬杠/爱科普/爱求资源/爱接梗/自言自语）",
+    "tone_note": "本批整体情绪与活跃特点",
+}
+
+_PROFILE_PROMPT_PAYLOAD_MAX_CHARS = 95_000
 _PROFILE_PROMPT_TEXT_LIMIT = 320
 _PROFILE_ALL_CHUNK_MAX_CHARS = 75_000
 _PROFILE_REDUCE_MAX_CHARS = 75_000
+_PROFILE_ANALYTICS_DB_LIMIT = 500
+_PROFILE_BASELINE_LIMIT = 5000
 _RICH_MESSAGE_MAX_CHARS = 32_768
 
 _SENSITIVE_OUTPUT_PATTERNS = tuple(
@@ -100,6 +134,11 @@ class ProfileSample:
     kind: str
     link: str = ""
     source_label: str = ""
+    chat_id: int | None = None
+    raw_message_id: int | None = None
+    reply_to_message_id: int | None = None
+    reply_context: str = ""
+    reply_to_sender_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -128,6 +167,7 @@ class ProfileQuote:
     text: str
     comment: str = ""
     link: str = ""
+    reply_context: str = ""
 
 
 @dataclass(frozen=True)
@@ -146,6 +186,7 @@ class ProfileResult:
     ratings: list[ProfileRating]
     verdict: list[str]
     closing: str
+    archetype: str = ""
 
 
 class UserProfileModule:
@@ -295,6 +336,9 @@ class UserProfileModule:
             phase = "collect_samples"
             sample_started_at = time.monotonic()
             archived_samples: list[ProfileSample] = []
+            analytics_pool: list[ProfileSample] = []
+            group_recent_messages: list[Any] = []
+            noise_stats = (0, 0, 0, 0)  # raw_count, filtered_noise, bot_cmd, ritual
             backfill_complete = True
             completed_backfill_groups = 0
             chat_history_enabled = self.chat_history is not None and bool(self.chat_history.config.enabled)
@@ -303,36 +347,84 @@ class UserProfileModule:
             if chat_history_enabled and self.chat_history is not None:
                 store = self.chat_history
 
-                def _query_archive() -> tuple[list[ProfileSample], bool, int]:
+                def _query_archive() -> tuple[
+                    list[ProfileSample],
+                    list[ProfileSample],
+                    list[Any],
+                    tuple[int, int, int, int],
+                    bool,
+                    int,
+                ]:
+                    recent_chat = store.get_recent_chat_messages(chat_id, _PROFILE_BASELINE_LIMIT)
                     if history_scope == "all":
-                        rows = collect_archived_profile_samples_across_chats(
+                        raw_rows = collect_archived_profile_samples_across_chats(
                             store,
                             monitored_chats,
                             target_id,
                             self.config.command_prefixes,
                         )
+                        clean_rows, f_cnt, b_cnt, r_cnt = filter_noise_samples(
+                            raw_rows,
+                            min_required=self.config.min_required_samples,
+                        )
+                        enriched = _enrich_samples_with_reply_context(store, clean_rows)
                         completed = sum(
                             bool(state and state.is_complete)
                             for item in monitored_chats
                             if (state := store.get_backfill_state(item.chat_id)) is not None
                         )
-                        return rows, bool(monitored_chats) and completed == len(monitored_chats), completed
-                    rows = collect_archived_profile_samples(
+                        return (
+                            enriched,
+                            enriched,
+                            recent_chat,
+                            (len(raw_rows), f_cnt, b_cnt, r_cnt),
+                            bool(monitored_chats) and completed == len(monitored_chats),
+                            completed,
+                        )
+
+                    fetch_limit = (
+                        None
+                        if command.all_history
+                        else max(command.sample_size * 3, _PROFILE_ANALYTICS_DB_LIMIT)
+                    )
+                    raw_rows = collect_archived_profile_samples(
                         store,
                         chat_id,
                         target_id,
-                        None if command.all_history else command.sample_size,
+                        fetch_limit,
                         self.config.command_prefixes,
                         chat_username,
                     )
+                    clean_rows, f_cnt, b_cnt, r_cnt = filter_noise_samples(
+                        raw_rows,
+                        min_required=self.config.min_required_samples,
+                    )
+                    pool_limit = None if command.all_history else max(command.sample_size, _PROFILE_ANALYTICS_DB_LIMIT)
+                    pool = clean_rows if pool_limit is None else clean_rows[-pool_limit:]
+                    enriched_pool = _enrich_samples_with_reply_context(store, pool)
+                    selected_rows = enriched_pool if command.all_history else enriched_pool[-command.sample_size :]
                     complete = True
                     if history_scope == "local":
                         backfill_state = store.get_backfill_state(chat_id)
                         complete = bool(backfill_state and backfill_state.is_complete)
-                    return rows, complete, 0
+                    return (
+                        selected_rows,
+                        enriched_pool,
+                        recent_chat,
+                        (len(raw_rows), f_cnt, b_cnt, r_cnt),
+                        complete,
+                        0,
+                    )
 
                 try:
-                    archived_samples, backfill_complete, completed_backfill_groups = await asyncio.to_thread(_query_archive)
+                    (
+                        archived_samples,
+                        analytics_pool,
+                        group_recent_messages,
+                        noise_stats,
+                        backfill_complete,
+                        completed_backfill_groups,
+                    ) = await asyncio.to_thread(_query_archive)
                 except Exception as exc:
                     if command.all_history:
                         raise RuntimeError(f"读取本地聊天归档失败：{exc}") from exc
@@ -344,7 +436,7 @@ class UserProfileModule:
 
             telegram_samples: list[ProfileSample] = []
             if not command.all_history and len(archived_samples) < command.sample_size:
-                telegram_samples = await collect_profile_samples(
+                raw_tg_samples = await collect_profile_samples(
                     client,
                     chat_id,
                     target_id,
@@ -352,6 +444,12 @@ class UserProfileModule:
                     self.config.command_prefixes,
                     chat_username,
                 )
+                telegram_samples, tg_f, tg_b, tg_r = filter_noise_samples(
+                    raw_tg_samples,
+                    min_required=self.config.min_required_samples,
+                )
+                if not archived_samples:
+                    noise_stats = (len(raw_tg_samples), tg_f, tg_b, tg_r)
             samples = (
                 archived_samples
                 if command.all_history
@@ -381,6 +479,29 @@ class UserProfileModule:
                 )
                 return HandlerResult.handled(self.card.id, "insufficient samples")
 
+            phase = "compute_analytics"
+            fingerprint_samples = analytics_pool if len(analytics_pool) >= len(samples) else samples
+            raw_count, filtered_noise, bot_cmd_cnt, ritual_cnt = noise_stats
+            analytics = await asyncio.to_thread(
+                compute_profile_analytics,
+                fingerprint_samples,
+                raw_count=raw_count or len(fingerprint_samples),
+                filtered_noise_count=filtered_noise,
+                bot_cmd_count=bot_cmd_cnt,
+                ritual_count=ritual_cnt,
+                target_user_id=target_id,
+                group_recent_messages=group_recent_messages or None,
+            )
+            peer_ids = list(
+                dict.fromkeys(
+                    [peer.user_id for peer in analytics.top_replied_to]
+                    + [peer.user_id for peer in analytics.top_replied_by]
+                )
+            )[:4]
+            if peer_ids:
+                resolved_peers = await self._resolve_peer_labels(client, peer_ids)
+                analytics = with_resolved_peer_labels(analytics, resolved_peers)
+
             provider = self.ai_config.reply_provider
             phase = "publish_ai_status"
             if command.all_history:
@@ -395,25 +516,40 @@ class UserProfileModule:
                     history_scope=history_scope,
                     monitored_group_count=len(monitored_chats),
                     completed_backfill_groups=completed_backfill_groups,
+                    analytics=analytics,
                 )
             else:
-                prompt_samples = select_profile_prompt_samples(samples)
+                prompt_samples = select_profile_prompt_samples(
+                    samples,
+                    distinctive_terms=analytics.distinctive_terms,
+                )
+                fingerprint_hint = (
+                    f"行为指纹已覆盖近期 {analytics.analyzed_count} 条发言与本群相对基准。"
+                    if analytics.analyzed_count > len(samples) or analytics.baseline is not None
+                    else (
+                        "全部样本原文都会交给模型。"
+                        if len(prompt_samples) == len(samples)
+                        else f"统计覆盖全部样本，并按信息密度与时间轴精选 {len(prompt_samples)} 条代表性原文。"
+                    )
+                )
                 status_message = await self._edit_or_send(
                     event,
                     status_message,
                     replied,
                     format_profile_progress(
                         f"③ 已读取 {len(samples)} 条有效样本，正在请求 {provider.model or 'AI 模型'} 分析……",
-                        (
-                            "全部样本原文都会交给模型。"
-                            if len(prompt_samples) == len(samples)
-                            else f"统计覆盖全部样本，并从完整时间范围均匀选取 {len(prompt_samples)} 条代表性原文。"
-                        ),
+                        fingerprint_hint,
                         f"最长等待 {self.config.timeout_seconds:g} 秒，超时会自动停止并显示原因。",
                     ),
                     phase=phase,
                 )
-                prompt = build_profile_prompt(target_label, samples, self.config, prompt_samples)
+                prompt = build_profile_prompt(
+                    target_label,
+                    samples,
+                    self.config,
+                    prompt_samples,
+                    analytics=analytics,
+                )
                 logger.info(
                     "User profile prompt ready: chat_id=%s message_id=%s target_id=%s total_samples=%s prompt_samples=%s prompt_chars=%s",
                     chat_id,
@@ -439,6 +575,7 @@ class UserProfileModule:
                     samples=samples,
                     model=self.ai_config.reply_provider.model,
                     total_tokens=total_tokens,
+                    analytics=analytics,
                 )
                 rich_published = await self._try_edit_profile_rich_blocks(
                     event,
@@ -448,6 +585,7 @@ class UserProfileModule:
                     samples=samples,
                     model=self.ai_config.reply_provider.model,
                     total_tokens=total_tokens,
+                    analytics=analytics,
                 )
                 if rich_published:
                     rich_delivery = "rich_blocks_edit"
@@ -460,6 +598,7 @@ class UserProfileModule:
                         samples=samples,
                         model=self.ai_config.reply_provider.model,
                         total_tokens=total_tokens,
+                        analytics=analytics,
                     )
                     if rich_published:
                         rich_delivery = "rich_blocks_send"
@@ -495,6 +634,7 @@ class UserProfileModule:
                     samples=samples,
                     model=self.ai_config.reply_provider.model,
                     total_tokens=total_tokens,
+                    analytics=analytics,
                 )
                 published_message = await self._edit_or_send(
                     event,
@@ -654,6 +794,7 @@ class UserProfileModule:
         samples: list[ProfileSample],
         model: str,
         total_tokens: int,
+        analytics: ProfileAnalytics | None = None,
     ) -> bool:
         rich_message = self._build_profile_rich_blocks(
             profile,
@@ -661,6 +802,7 @@ class UserProfileModule:
             samples=samples,
             model=model,
             total_tokens=total_tokens,
+            analytics=analytics,
         )
         if rich_message is None:
             return False
@@ -676,6 +818,7 @@ class UserProfileModule:
         samples: list[ProfileSample],
         model: str,
         total_tokens: int,
+        analytics: ProfileAnalytics | None = None,
     ) -> bool:
         rich_message = self._build_profile_rich_blocks(
             profile,
@@ -683,6 +826,7 @@ class UserProfileModule:
             samples=samples,
             model=model,
             total_tokens=total_tokens,
+            analytics=analytics,
         )
         if rich_message is None:
             return False
@@ -696,6 +840,7 @@ class UserProfileModule:
         samples: list[ProfileSample],
         model: str,
         total_tokens: int,
+        analytics: ProfileAnalytics | None = None,
     ) -> Any | None:
         try:
             import telethon
@@ -715,6 +860,7 @@ class UserProfileModule:
                 model=model,
                 total_tokens=total_tokens,
                 rich_types=types,
+                analytics=analytics,
             )
         except Exception:
             logger.warning("User profile explicit rich block construction failed", exc_info=True)
@@ -869,6 +1015,27 @@ class UserProfileModule:
                 exc_info=True,
             )
 
+    async def _resolve_peer_labels(
+        self,
+        client: Any,
+        peer_ids: list[int],
+    ) -> dict[int, tuple[str, bool]]:
+        if client is None or not hasattr(client, "get_entity"):
+            return {}
+        resolved: dict[int, tuple[str, bool]] = {}
+        for uid in peer_ids[:4]:
+            try:
+                entity = await asyncio.wait_for(client.get_entity(uid), timeout=2.0)
+            except Exception:
+                continue
+            if entity is None:
+                continue
+            label = profile_target_label(entity, uid)
+            if label == f"用户 {uid}":
+                continue
+            resolved[uid] = (label, bool(getattr(entity, "bot", False)))
+        return resolved
+
     async def _generate_all_history_profile(
         self,
         event: Any,
@@ -881,6 +1048,7 @@ class UserProfileModule:
         history_scope: str,
         monitored_group_count: int,
         completed_backfill_groups: int,
+        analytics: ProfileAnalytics | None = None,
     ) -> tuple[dict[str, Any], int, Any]:
         chunks = chunk_profile_samples(samples)
         provider = self.ai_config.reply_provider
@@ -905,7 +1073,7 @@ class UserProfileModule:
                 status_message,
                 replied,
                 format_profile_progress(
-                    f"③ 全量分析 {index}/{len(chunks)}：正在处理第 {index} 批消息……",
+                    f"③ 全量分析 {index}/{len(chunks)}：正在提取第 {index} 批事实素材……",
                     f"共 {len(samples)} 条有效文字，所有消息都会逐批交给 {provider.model or 'AI 模型'}。",
                     coverage_line,
                 ),
@@ -927,9 +1095,12 @@ class UserProfileModule:
                 len(chunk),
                 len(prompt),
             )
-            raw, used_tokens = await self._generate_profile_with_timeout(prompt)
+            raw, used_tokens = await self._generate_profile_with_timeout(
+                prompt,
+                system_prompt=PROFILE_EXTRACT_SYSTEM_PROMPT,
+            )
             total_tokens += used_tokens
-            summaries.append(profile_result_to_summary(normalize_profile_result(raw, chunk)))
+            summaries.append(normalize_chunk_extract(raw, chunk))
 
         reduce_level = 1
         while True:
@@ -941,7 +1112,7 @@ class UserProfileModule:
                     replied,
                     format_profile_progress(
                         "④ 所有历史消息均已分析，正在生成最终用户画像……",
-                        f"正在汇总 {len(chunks)} 批局部结论，最终引用仍会用数据库原文校验。",
+                        f"正在结合全局行为指纹与 {len(chunks)} 批事实素材生成画像，最终引用仍由本地原文校验。",
                         coverage_line,
                     ),
                     phase="ai_all_final_reduce",
@@ -953,6 +1124,7 @@ class UserProfileModule:
                     self.config,
                     final=True,
                     reduce_level=reduce_level,
+                    analytics=analytics,
                 )
                 raw, used_tokens = await self._generate_profile_with_timeout(prompt)
                 total_tokens += used_tokens
@@ -966,7 +1138,7 @@ class UserProfileModule:
                     replied,
                     format_profile_progress(
                         f"④ 分层汇总 {reduce_level}：正在合并 {index}/{len(groups)}……",
-                        f"已完整处理 {len(samples)} 条消息，正在压缩局部结论以适配模型上下文。",
+                        f"已完整处理 {len(samples)} 条消息，正在压缩局部事实卡片以适配模型上下文。",
                         coverage_line,
                     ),
                     phase=f"ai_all_reduce_{reduce_level}_{index}",
@@ -978,17 +1150,30 @@ class UserProfileModule:
                     self.config,
                     final=False,
                     reduce_level=reduce_level,
+                    analytics=analytics,
                 )
-                raw, used_tokens = await self._generate_profile_with_timeout(prompt)
+                raw, used_tokens = await self._generate_profile_with_timeout(
+                    prompt,
+                    system_prompt=PROFILE_EXTRACT_SYSTEM_PROMPT,
+                )
                 total_tokens += used_tokens
-                reduced.append(profile_result_to_summary(normalize_profile_result(raw, samples)))
+                reduced.append(normalize_chunk_extract(raw, samples, max_moments=12))
             summaries = reduced
             reduce_level += 1
 
-    async def _generate_profile_with_timeout(self, prompt: str) -> tuple[dict[str, Any], int]:
+    async def _generate_profile_with_timeout(
+        self,
+        prompt: str,
+        *,
+        system_prompt: str | None = None,
+    ) -> tuple[dict[str, Any], int]:
         timeout_seconds = max(0.001, float(self.config.timeout_seconds))
         started_at = time.monotonic()
-        task = asyncio.create_task(self._generate_profile(prompt))
+        if system_prompt is not None and _callable_supports_parameter(self._generate_profile, "system_prompt"):
+            coro = self._generate_profile(prompt, system_prompt=system_prompt)
+        else:
+            coro = self._generate_profile(prompt)
+        task = asyncio.create_task(coro)
         self._active_tasks.add(task)
         try:
             done, _pending = await asyncio.wait({task}, timeout=timeout_seconds)
@@ -1025,13 +1210,19 @@ class UserProfileModule:
         )
         raise TimeoutError(error)
 
-    async def _generate_profile(self, prompt: str) -> tuple[dict[str, Any], int]:
+    async def _generate_profile(
+        self,
+        prompt: str,
+        *,
+        system_prompt: str | None = None,
+    ) -> tuple[dict[str, Any], int]:
         provider = self.ai_config.reply_provider
         if not provider.api_key:
             raise ValueError("请先在管理后台的 AI 服务配置中填写回复服务 API Key。")
         if not provider.model:
             raise ValueError("请先在管理后台的 AI 服务配置中填写回复模型。")
 
+        effective_system = system_prompt or PROFILE_SYSTEM_PROMPT
         started_at = time.monotonic()
         use_anthropic = is_anthropic_provider(provider.provider_type)
         use_chat_completions = is_chat_completions_provider(provider.provider_type)
@@ -1052,13 +1243,13 @@ class UserProfileModule:
         )
         try:
             if use_anthropic:
-                response = await self._call_anthropic(prompt)
+                response = await self._call_anthropic(prompt, effective_system)
                 answer, _ = collect_anthropic_text_and_sources(response)
             elif use_chat_completions:
-                response = await self._call_openai_chat_completions(prompt)
+                response = await self._call_openai_chat_completions(prompt, effective_system)
                 answer, _ = collect_chat_completions_text_and_sources(response)
             else:
-                response = await self._call_openai(prompt)
+                response = await self._call_openai(prompt, effective_system)
                 answer, _ = collect_response_text_and_sources(response)
             parsed = parse_profile_json(answer)
             counts = extract_usage_counts(response)
@@ -1084,7 +1275,7 @@ class UserProfileModule:
             )
             raise
 
-    async def _call_openai(self, prompt: str) -> Any:
+    async def _call_openai(self, prompt: str, system_prompt: str = PROFILE_SYSTEM_PROMPT) -> Any:
         if AsyncOpenAI is None:
             raise RuntimeError("缺少 openai 依赖，请重新安装 requirements.txt。")
         provider = self.ai_config.reply_provider
@@ -1096,7 +1287,7 @@ class UserProfileModule:
             return await client.responses.create(
                 model=provider.model,
                 input=[
-                    {"role": "system", "content": PROFILE_SYSTEM_PROMPT},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt},
                 ],
                 store=False,
@@ -1108,7 +1299,7 @@ class UserProfileModule:
             except Exception:
                 pass
 
-    async def _call_openai_chat_completions(self, prompt: str) -> Any:
+    async def _call_openai_chat_completions(self, prompt: str, system_prompt: str = PROFILE_SYSTEM_PROMPT) -> Any:
         if AsyncOpenAI is None:
             raise RuntimeError("缺少 openai 依赖，请重新安装 requirements.txt。")
         provider = self.ai_config.reply_provider
@@ -1123,7 +1314,7 @@ class UserProfileModule:
                     prompt,
                     [],
                     "",
-                    system_prompt=PROFILE_SYSTEM_PROMPT,
+                    system_prompt=system_prompt,
                 ),
                 max_tokens=self.config.max_tokens,
             )
@@ -1133,7 +1324,7 @@ class UserProfileModule:
             except Exception:
                 pass
 
-    async def _call_anthropic(self, prompt: str) -> Any:
+    async def _call_anthropic(self, prompt: str, system_prompt: str = PROFILE_SYSTEM_PROMPT) -> Any:
         provider = self.ai_config.reply_provider
         client = make_async_anthropic_client(provider.api_key, provider.base_url, self.config.timeout_seconds)
         try:
@@ -1142,7 +1333,7 @@ class UserProfileModule:
                 {
                     "model": provider.model,
                     "max_tokens": self.config.max_tokens,
-                    "system": PROFILE_SYSTEM_PROMPT,
+                    "system": system_prompt,
                     "messages": [{"role": "user", "content": prompt}],
                 },
             )
@@ -1297,6 +1488,9 @@ def collect_archived_profile_samples(
                 text=item.text if sample_size is None else _clip(item.text, 480),
                 kind="text",
                 link=build_message_link(chat_id, item.message_id, chat_username),
+                chat_id=item.chat_id,
+                raw_message_id=item.message_id,
+                reply_to_message_id=item.reply_to_message_id,
             )
         )
     return samples if sample_size is None else samples[-sample_size:]
@@ -1326,9 +1520,66 @@ def collect_archived_profile_samples_across_chats(
                 kind="text",
                 link=build_message_link(item.chat_id, item.message_id, source.username),
                 source_label=source.title,
+                chat_id=item.chat_id,
+                raw_message_id=item.message_id,
+                reply_to_message_id=item.reply_to_message_id,
             )
         )
     return samples
+
+
+def _enrich_samples_with_reply_context(
+    store: ChatHistoryStore,
+    samples: list[ProfileSample],
+    *,
+    max_lookup_ids: int = 2000,
+) -> list[ProfileSample]:
+    """Attach concise replied-to snippet and sender ID from local SQLite by primary key."""
+    if not samples:
+        return []
+    ids_by_chat: dict[int, list[int]] = {}
+    for sample in reversed(samples):
+        if sample.chat_id is None or sample.reply_to_message_id is None:
+            continue
+        bucket = ids_by_chat.setdefault(sample.chat_id, [])
+        if len(bucket) < max_lookup_ids:
+            bucket.append(sample.reply_to_message_id)
+    if not ids_by_chat:
+        return samples
+
+    replied_lookup: dict[tuple[int, int], Any] = {}
+    for cid, msg_ids in ids_by_chat.items():
+        found = store.get_messages_by_ids(cid, msg_ids)
+        for mid, stored_msg in found.items():
+            replied_lookup[(cid, mid)] = stored_msg
+    if not replied_lookup:
+        return samples
+
+    enriched: list[ProfileSample] = []
+    for sample in samples:
+        if sample.chat_id is None or sample.reply_to_message_id is None:
+            enriched.append(sample)
+            continue
+        parent = replied_lookup.get((sample.chat_id, sample.reply_to_message_id))
+        if parent is None:
+            enriched.append(sample)
+            continue
+        enriched.append(
+            ProfileSample(
+                message_id=sample.message_id,
+                date=sample.date,
+                text=sample.text,
+                kind=sample.kind,
+                link=sample.link,
+                source_label=sample.source_label,
+                chat_id=sample.chat_id,
+                raw_message_id=sample.raw_message_id,
+                reply_to_message_id=sample.reply_to_message_id,
+                reply_context=_clip(parent.text, 44),
+                reply_to_sender_id=parent.sender_id,
+            )
+        )
+    return enriched
 
 
 def merge_profile_samples(
@@ -1353,6 +1604,7 @@ async def collect_profile_samples(
 ) -> list[ProfileSample]:
     samples: list[ProfileSample] = []
     scan_limit = max(sample_size, min(sample_size * 3, 5000))
+    numeric_chat_id = _as_int_or_none(chat_id)
     async for item in client.iter_messages(chat_id, from_user=target, limit=scan_limit):
         raw_text = message_text(item)
         if raw_text and _matches_any_command(raw_text, command_prefixes):
@@ -1373,6 +1625,9 @@ async def collect_profile_samples(
                 text=_clip(sample_text, 480),
                 kind=kind,
                 link=build_message_link(chat_id, message_id, chat_username),
+                chat_id=numeric_chat_id,
+                raw_message_id=message_id,
+                reply_to_message_id=_positive_int(getattr(item, "reply_to_msg_id", None)),
             )
         )
         if len(samples) >= sample_size:
@@ -1418,8 +1673,12 @@ def build_message_link(chat_id: Any, message_id: int, chat_username: str = "") -
     return f"https://t.me/c/{raw[3:]}/{message_id}"
 
 
-def select_profile_prompt_samples(samples: list[ProfileSample]) -> list[ProfileSample]:
-    """Keep broad chronological coverage while bounding a single AI request."""
+def select_profile_prompt_samples(
+    samples: list[ProfileSample],
+    *,
+    distinctive_terms: list[str] | tuple[str, ...] = (),
+) -> list[ProfileSample]:
+    """Keep full time coverage while favoring high-information samples within budget."""
     if not samples:
         return []
     if _profile_payload_length(samples) <= _PROFILE_PROMPT_PAYLOAD_MAX_CHARS:
@@ -1427,10 +1686,10 @@ def select_profile_prompt_samples(samples: list[ProfileSample]) -> list[ProfileS
 
     low = 2
     high = len(samples) - 1
-    selected = _evenly_spaced_samples(samples, 2)
+    selected = select_informative_samples(samples, 2, distinctive_terms=distinctive_terms)
     while low <= high:
         count = (low + high) // 2
-        candidate = _evenly_spaced_samples(samples, count)
+        candidate = select_informative_samples(samples, count, distinctive_terms=distinctive_terms)
         if _profile_payload_length(candidate) <= _PROFILE_PROMPT_PAYLOAD_MAX_CHARS:
             selected = candidate
             low = count + 1
@@ -1439,20 +1698,24 @@ def select_profile_prompt_samples(samples: list[ProfileSample]) -> list[ProfileS
     return selected
 
 
-def _evenly_spaced_samples(samples: list[ProfileSample], count: int) -> list[ProfileSample]:
-    if count >= len(samples):
-        return list(samples)
-    if count <= 1:
-        return [samples[-1]]
-    last_index = len(samples) - 1
-    return [samples[round(index * last_index / (count - 1))] for index in range(count)]
+def _sample_context_tag(sample: ProfileSample) -> str:
+    parts: list[str] = []
+    if sample.source_label:
+        parts.append(sample.source_label)
+    if sample.kind != "text":
+        parts.append(sample.kind)
+    if sample.reply_context:
+        parts.append(f"回:{_clip(sample.reply_context, 36)}")
+    return "|".join(parts)
+
+
+def _sample_wire_row(sample: ProfileSample, *, full_text: bool = False) -> list[Any]:
+    text = sample.text if full_text else _clip(sample.text, _PROFILE_PROMPT_TEXT_LIMIT)
+    return [sample.message_id, format_sample_time_tag(sample.date), _sample_context_tag(sample), text]
 
 
 def _profile_prompt_payload(samples: list[ProfileSample]) -> list[list[Any]]:
-    return [
-        [sample.message_id, sample.kind, sample.source_label, _clip(sample.text, _PROFILE_PROMPT_TEXT_LIMIT)]
-        for sample in samples
-    ]
+    return [_sample_wire_row(sample, full_text=False) for sample in samples]
 
 
 def _profile_payload_length(samples: list[ProfileSample]) -> int:
@@ -1472,7 +1735,7 @@ def chunk_profile_samples(
     current_chars = 2
     for sample in samples:
         encoded = json.dumps(
-            [sample.message_id, sample.kind, sample.source_label, sample.text],
+            _sample_wire_row(sample, full_text=True),
             ensure_ascii=False,
             separators=(",", ":"),
         )
@@ -1519,13 +1782,21 @@ def build_profile_prompt(
     samples: list[ProfileSample],
     config: UserProfileConfig,
     prompt_samples: list[ProfileSample] | None = None,
+    *,
+    analytics: ProfileAnalytics | None = None,
 ) -> str:
     text_lengths = [len(sample.text) for sample in samples if sample.kind == "text" and sample.text]
     average_length = round(sum(text_lengths) / len(text_lengths), 1) if text_lengths else 0
     sticker_count = sum(sample.kind == "sticker" for sample in samples)
     media_count = sum(sample.kind != "text" for sample in samples)
-    evidence_samples = prompt_samples if prompt_samples is not None else select_profile_prompt_samples(samples)
+    effective_analytics = analytics if analytics is not None else compute_profile_analytics(samples)
+    evidence_samples = (
+        prompt_samples
+        if prompt_samples is not None
+        else select_profile_prompt_samples(samples, distinctive_terms=effective_analytics.distinctive_terms)
+    )
     payload = _profile_prompt_payload(evidence_samples)
+    analytics_block = format_analytics_for_prompt(effective_analytics)
     return (
         f"目标：{target_label}\n"
         f"样本数：{len(samples)}\n"
@@ -1534,12 +1805,14 @@ def build_profile_prompt(
         f"纯文本平均长度：{average_length} 字\n"
         f"贴纸：{sticker_count} 条（{_percentage(sticker_count, len(samples))}）\n"
         f"全部媒体：{media_count} 条（{_percentage(media_count, len(samples))}）\n\n"
+        f"{analytics_block}\n\n"
         f"写作风格：{config.style_prompt}\n"
         "安全边界：不得推断敏感属性、使用诊断性标签或把有限样本写成永久人格。\n"
-        "请输出 2–3 个性格速写、3–5 个兴趣/话题、3 条代表语录、3–4 个一至五星评分维度和 2–4 个总评要点。"
+        "输出要求：1 个专属生态位 archetype、1 句灵魂摘要 tagline、3 个高区分度性格速写、3–5 个具体细分兴趣/话题、"
+        "3 条最具辨识度的代表语录、4 个严格按锚点拉开 1–5 星差距的评分维度和 3–4 个独特规律/反差总评。"
         "evidence_ids 和 quotes.message_id 只能使用下方存在的 id。\n"
         f"严格 JSON 结构：{json.dumps(_JSON_SCHEMA, ensure_ascii=False)}\n\n"
-        "消息样本每项依次为 [evidence_id, kind, source_chat, text]：\n"
+        "消息样本每项依次为 [evidence_id, 北京时间, 上下文(群名/媒体/回:被回复前情), text]：\n"
         f"{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}"
     )
 
@@ -1553,24 +1826,20 @@ def build_profile_chunk_prompt(
     total_chunks: int,
     total_samples: int,
 ) -> str:
-    payload = [
-        [sample.message_id, sample.kind, sample.source_label, sample.text]
-        for sample in samples
-    ]
+    payload = [_sample_wire_row(sample, full_text=True) for sample in samples]
     return (
         f"目标：{target_label}\n"
         f"全量历史总消息数：{total_samples}\n"
         f"当前批次：{chunk_index}/{total_chunks}\n"
         f"当前批次消息数：{len(samples)}\n"
         f"当前批次时间范围：{format_sample_date_range(samples)}\n\n"
-        f"写作风格：{config.style_prompt}\n"
-        "任务：只总结当前批次，保留能代表该批次的真实 message_id，供稍后的全局汇总使用。"
-        "当前批次的每条消息都已提供，不得忽略、抽样或编造。\n"
-        "安全边界：不得推断敏感属性、使用诊断性标签或把群聊表现写成永久人格。\n"
-        "请输出 2–3 个性格速写、3–5 个兴趣/话题、至多 3 条代表语录、3–4 个评分维度和 2–4 个总评要点。"
-        "evidence_ids 和 quotes.message_id 只能使用下方存在的 id。\n"
-        f"严格 JSON 结构：{json.dumps(_JSON_SCHEMA, ensure_ascii=False)}\n\n"
-        "消息样本每项依次为 [evidence_id, kind, source_chat, text]：\n"
+        "任务：从本批消息中提取具体事实素材与高能原话 ID，供最终汇总使用。不要写空泛人设套话。\n"
+        "当前批次的每条消息都已完整提供，不得忽略或编造 message_id。\n"
+        "安全边界：不得推断敏感属性、使用诊断性标签或编造样本外事实。\n"
+        "请输出：3–6 条具体说话习惯/口头禅（带具体例子）、3–6 个具体细分话题与态度、"
+        "最多 8 条最有辨识度/笑点/反差的 moments（只需填 message_id 和 why，本地会自动回填原文），以及互动姿态与情绪特点。\n"
+        f"严格 JSON 结构：{json.dumps(_CHUNK_EXTRACT_SCHEMA, ensure_ascii=False)}\n\n"
+        "消息样本每项依次为 [evidence_id, 北京时间, 上下文(群名/媒体/回:被回复前情), text]：\n"
         f"{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}"
     )
 
@@ -1583,31 +1852,168 @@ def build_profile_reduce_prompt(
     *,
     final: bool,
     reduce_level: int,
+    analytics: ProfileAnalytics | None = None,
 ) -> str:
     text_lengths = [len(sample.text) for sample in samples if sample.kind == "text" and sample.text]
     average_length = round(sum(text_lengths) / len(text_lengths), 1) if text_lengths else 0
-    stage = "生成最终用户画像" if final else "合并成更紧凑的中间画像摘要"
+    if not final:
+        return (
+            f"目标：{target_label}\n"
+            f"全量历史消息数：{len(samples)}\n"
+            f"全量时间范围：{format_sample_date_range(samples)}\n"
+            f"汇总层级：{reduce_level}\n"
+            "当前任务：合并多批事实素材卡片，保留具体名词、高频口头禅、反差线索和最具辨识度的 moments（保留真实 message_id），不要退化成抽象套话。\n"
+            "安全边界：不得推断敏感属性、使用诊断性标签或编造不存在的 message_id。\n"
+            f"严格 JSON 结构：{json.dumps(_CHUNK_EXTRACT_SCHEMA, ensure_ascii=False)}\n\n"
+            "待合并的事实素材卡片：\n"
+            f"{json.dumps(summaries, ensure_ascii=False, separators=(',', ':'))}"
+        )
+
+    effective_analytics = analytics if analytics is not None else compute_profile_analytics(samples)
+    analytics_block = format_analytics_for_prompt(effective_analytics)
     return (
         f"目标：{target_label}\n"
         f"全量历史消息数：{len(samples)}\n"
         f"全量时间范围：{format_sample_date_range(samples)}\n"
         f"纯文本平均长度：{average_length} 字\n"
         f"汇总层级：{reduce_level}\n"
-        f"当前任务：{stage}\n\n"
+        "当前任务：结合【全局客观行为指纹】与下方各时期的真实事实素材卡片，一次性生成极具区分度的最终用户画像。\n\n"
+        f"{analytics_block}\n\n"
         f"写作风格：{config.style_prompt}\n"
-        "下方每个 JSON 都是模型对不同历史分块的局部结论；所有原始消息都已在前序分块中逐条分析。"
-        "请合并重复观点，保留跨时间稳定出现的模式，也保留有代表性的差异。\n"
-        "不得创造局部摘要中不存在的 message_id。最终原文会由本地数据库再次校验。\n"
+        "下方每张卡片均来自对全部历史消息的逐条提取，moments 中已由本地数据库回填真实原话、时间与回复前情。\n"
+        "请充分利用跨时间/跨群反差、具体名词、口头禅与高能原话，严格遵守遮名测试，拒绝万金油算命文案。\n"
+        "不得创造素材卡片中不存在的 message_id。最终原文会由本地数据库再次校验。\n"
         "安全边界：不得推断敏感属性、使用诊断性标签或把群聊表现写成永久人格。\n"
-        "请输出 2–3 个性格速写、3–5 个兴趣/话题、3 条代表语录、3–4 个一至五星评分维度和 2–4 个总评要点。\n"
+        "请输出：1 个专属生态位 archetype、1 句灵魂摘要 tagline、3 个高区分度性格速写、3–5 个具体细分兴趣/话题、"
+        "3 条代表语录、4 个严格按锚点拉开 1–5 星差距的评分维度和 3–4 个独特规律/变化总评。\n"
         f"严格 JSON 结构：{json.dumps(_JSON_SCHEMA, ensure_ascii=False)}\n\n"
-        "局部画像摘要：\n"
+        "各时期事实素材卡片：\n"
         f"{json.dumps(summaries, ensure_ascii=False, separators=(',', ':'))}"
     )
 
 
+def normalize_chunk_extract(
+    raw: dict[str, Any],
+    samples: list[ProfileSample],
+    *,
+    max_moments: int = 8,
+) -> dict[str, Any]:
+    """Normalize a Map-stage fact card and hydrate every moment with verified local text."""
+    sample_by_id = {sample.message_id: sample for sample in samples}
+    valid_ids = set(sample_by_id)
+
+    period = _clip(_string_value(raw.get("period")), 48) or format_sample_date_range(samples)
+    habits = [_clip(_string_value(item), 120) for item in _list_value(raw.get("habits"))[:6]]
+    habits = [item for item in habits if item]
+    # 兼容旧版或测试 stub 返回 personality/interests/quotes 的情形
+    if not habits and raw.get("personality"):
+        for item in _list_value(raw.get("personality"))[:4]:
+            if isinstance(item, dict):
+                title = _clip(_string_value(item.get("title")), 40)
+                analysis = _clip(_string_value(item.get("analysis")), 100)
+                if title or analysis:
+                    habits.append(f"{title}：{analysis}" if title and analysis else (title or analysis))
+
+    topics: list[dict[str, str]] = []
+    raw_topics = _list_value(raw.get("topics")) or _list_value(raw.get("interests"))
+    for item in raw_topics[:6]:
+        if isinstance(item, dict):
+            topic = _clip(_string_value(item.get("topic")), 40)
+            stance = _clip(_string_value(item.get("stance") or item.get("detail")), 90)
+        else:
+            topic = _clip(_string_value(item), 60)
+            stance = ""
+        if topic:
+            topics.append({"topic": topic, "stance": stance})
+
+    moments: list[dict[str, Any]] = []
+    seen_ids: set[int] = set()
+    raw_moments = _list_value(raw.get("moments")) or _list_value(raw.get("quotes"))
+    for item in raw_moments:
+        if not isinstance(item, dict):
+            continue
+        mid = _positive_int(item.get("message_id"))
+        if mid not in valid_ids or mid in seen_ids:
+            continue
+        sample = sample_by_id[mid]
+        moment: dict[str, Any] = {
+            "message_id": mid,
+            "time": format_sample_time_tag(sample.date),
+            "text": _clip(sample.text, 160),
+            "why": _clip(_string_value(item.get("why") or item.get("comment")), 90),
+        }
+        ctx = _sample_context_tag(sample)
+        if ctx:
+            moment["ctx"] = ctx
+        moments.append(moment)
+        seen_ids.add(mid)
+        if len(moments) >= max_moments:
+            break
+
+    # 若旧 stub 的 personality 带有 evidence_ids 也补进候选 moments，避免丢证据
+    if len(moments) < max_moments and raw.get("personality"):
+        for item in _list_value(raw.get("personality")):
+            if not isinstance(item, dict):
+                continue
+            for mid in _valid_message_ids(item.get("evidence_ids"), valid_ids, 2):
+                if mid in seen_ids:
+                    continue
+                sample = sample_by_id[mid]
+                moment = {
+                    "message_id": mid,
+                    "time": format_sample_time_tag(sample.date),
+                    "text": _clip(sample.text, 160),
+                    "why": _clip(_string_value(item.get("title")), 60),
+                }
+                ctx = _sample_context_tag(sample)
+                if ctx:
+                    moment["ctx"] = ctx
+                moments.append(moment)
+                seen_ids.add(mid)
+                if len(moments) >= max_moments:
+                    break
+            if len(moments) >= max_moments:
+                break
+
+    if not moments:
+        for sample in [item for item in samples if item.text][:3]:
+            moment = {
+                "message_id": sample.message_id,
+                "time": format_sample_time_tag(sample.date),
+                "text": _clip(sample.text, 160),
+                "why": "批次样本原话",
+            }
+            ctx = _sample_context_tag(sample)
+            if ctx:
+                moment["ctx"] = ctx
+            moments.append(moment)
+
+    social_style = _clip(_string_value(raw.get("social_style") or raw.get("tagline")), 120)
+    tone_note = _clip(_string_value(raw.get("tone_note") or raw.get("closing")), 120)
+    card = {
+        "period": period,
+        "habits": habits,
+        "topics": topics,
+        "moments": moments,
+        "social_style": social_style,
+        "tone_note": tone_note,
+    }
+    _ensure_texts_safe(
+        [
+            period,
+            social_style,
+            tone_note,
+            *habits,
+            *(part for item in topics for part in (item["topic"], item["stance"])),
+            *(item["why"] for item in moments),
+        ]
+    )
+    return card
+
+
 def profile_result_to_summary(result: ProfileResult) -> dict[str, Any]:
     return {
+        "archetype": result.archetype,
         "tagline": result.tagline,
         "personality": [
             {
@@ -1622,7 +2028,12 @@ def profile_result_to_summary(result: ProfileResult) -> dict[str, Any]:
             for item in result.interests
         ],
         "quotes": [
-            {"message_id": item.message_id, "comment": item.comment}
+            {
+                "message_id": item.message_id,
+                "text": item.text,
+                "comment": item.comment,
+                **({"reply_context": item.reply_context} if item.reply_context else {}),
+            }
             for item in result.quotes
         ],
         "ratings": [
@@ -1650,6 +2061,7 @@ def add_profile_coverage_warning(result: ProfileResult, history_scope: str = "lo
         ratings=result.ratings,
         verdict=[warning, *result.verdict],
         closing=result.closing,
+        archetype=result.archetype,
     )
 
 
@@ -1675,24 +2087,26 @@ def normalize_profile_result(raw: dict[str, Any], samples: list[ProfileSample]) 
     sample_by_id = {sample.message_id: sample for sample in samples}
     valid_ids = set(sample_by_id)
 
+    archetype = _clip(_string_value(raw.get("archetype")), 36)
+
     personality: list[ProfilePersonality] = []
-    for item in _list_value(raw.get("personality"))[:2]:
+    for item in _list_value(raw.get("personality"))[:3]:
         if not isinstance(item, dict):
             continue
         title = _clip(_string_value(item.get("title")), 48)
-        analysis = _clip(_string_value(item.get("analysis")), 280)
+        analysis = _clip(_string_value(item.get("analysis")), 240)
         if not title or not analysis:
             continue
         evidence_ids = _valid_message_ids(item.get("evidence_ids"), valid_ids, 3)
         personality.append(ProfilePersonality(title, analysis, evidence_ids))
 
     interests: list[ProfileInterest] = []
-    for item in _list_value(raw.get("interests"))[:4]:
+    for item in _list_value(raw.get("interests"))[:5]:
         if isinstance(item, dict):
-            topic = _clip(_string_value(item.get("topic")), 48)
-            detail = _clip(_string_value(item.get("detail")), 100)
+            topic = _clip(_string_value(item.get("topic")), 44)
+            detail = _clip(_string_value(item.get("detail")), 90)
         else:
-            topic = _clip(_string_value(item), 100)
+            topic = _clip(_string_value(item), 90)
             detail = ""
         if topic:
             interests.append(ProfileInterest(topic, detail))
@@ -1710,8 +2124,9 @@ def normalize_profile_result(raw: dict[str, Any], samples: list[ProfileSample]) 
             ProfileQuote(
                 message_id=message_id,
                 text=_clip(sample.text, 150),
-                comment=_clip(_string_value(item.get("comment")), 110),
+                comment=_clip(_string_value(item.get("comment")), 100),
                 link=sample.link,
+                reply_context=_clip(sample.reply_context, 44) if sample.reply_context else "",
             )
         )
         seen_quote_ids.add(message_id)
@@ -1719,9 +2134,17 @@ def normalize_profile_result(raw: dict[str, Any], samples: list[ProfileSample]) 
             break
     if not quotes:
         for sample in [item for item in samples if item.text][:3]:
-            quotes.append(ProfileQuote(sample.message_id, _clip(sample.text, 150), "样本原话。", sample.link))
+            quotes.append(
+                ProfileQuote(
+                    sample.message_id,
+                    _clip(sample.text, 150),
+                    "样本原话。",
+                    sample.link,
+                    _clip(sample.reply_context, 44) if sample.reply_context else "",
+                )
+            )
 
-    verdict = [_clip(_string_value(item), 100) for item in _list_value(raw.get("verdict"))[:3]]
+    verdict = [_clip(_string_value(item), 90) for item in _list_value(raw.get("verdict"))[:4]]
     verdict = [item for item in verdict if item]
     ratings: list[ProfileRating] = []
     for item in _list_value(raw.get("ratings"))[:4]:
@@ -1733,7 +2156,7 @@ def normalize_profile_result(raw: dict[str, Any], samples: list[ProfileSample]) 
         if dimension and score is not None:
             ratings.append(ProfileRating(dimension, score, comment))
     tagline = _clip(_string_value(raw.get("tagline")), 160) or "一份基于近期群聊样本的发言风格速写。"
-    closing = _clip(_string_value(raw.get("closing")), 200)
+    closing = _clip(_string_value(raw.get("closing")), 180)
     if not personality:
         personality = [ProfilePersonality("群聊切片", "样本暂时不足以形成更细的风格分类。", [])]
     if not interests:
@@ -1746,13 +2169,19 @@ def normalize_profile_result(raw: dict[str, Any], samples: list[ProfileSample]) 
             ProfileRating(dimension, 3, comment)
             for dimension, comment in zip(fallback_dimensions, verdict)
         ]
-    profile = ProfileResult(tagline, personality, interests, quotes, ratings, verdict, closing)
+    profile = ProfileResult(tagline, personality, interests, quotes, ratings, verdict, closing, archetype)
     ensure_profile_safety(profile)
     return profile
 
 
+def _ensure_texts_safe(parts: list[str]) -> None:
+    combined = "\n".join(part for part in parts if part)
+    if any(pattern.search(combined) for pattern in _SENSITIVE_OUTPUT_PATTERNS):
+        raise ValueError("AI 画像包含不适合公开的敏感属性推断，已拒绝发送。")
+
+
 def ensure_profile_safety(profile: ProfileResult) -> None:
-    ai_text = [profile.tagline, profile.closing, *profile.verdict]
+    ai_text = [profile.archetype, profile.tagline, profile.closing, *profile.verdict]
     for item in profile.personality:
         ai_text.extend((item.title, item.analysis))
     for item in profile.interests:
@@ -1760,9 +2189,13 @@ def ensure_profile_safety(profile: ProfileResult) -> None:
     ai_text.extend(item.comment for item in profile.quotes)
     for item in profile.ratings:
         ai_text.extend((item.dimension, item.comment))
-    combined = "\n".join(part for part in ai_text if part)
-    if any(pattern.search(combined) for pattern in _SENSITIVE_OUTPUT_PATTERNS):
-        raise ValueError("AI 画像包含不适合公开的敏感属性推断，已拒绝发送。")
+    _ensure_texts_safe(ai_text)
+
+
+def _fingerprint_heading(analytics: ProfileAnalytics, sample_count: int) -> str:
+    if analytics.analyzed_count > sample_count:
+        return f"🧬 行为指纹（近 {analytics.analyzed_count} 条）"
+    return "🧬 行为指纹"
 
 
 def render_profile_html(
@@ -1772,42 +2205,56 @@ def render_profile_html(
     samples: list[ProfileSample],
     model: str,
     total_tokens: int,
+    analytics: ProfileAnalytics | None = None,
 ) -> str:
-    detail_lines: list[str] = ["🧩 <b>性格速写</b>"]
+    detail_lines: list[str] = []
+    if analytics is not None:
+        fp_lines = format_analytics_display_lines(analytics)[:4]
+        if fp_lines:
+            detail_lines.append(f"<b>{_escape_clip(_fingerprint_heading(analytics, len(samples)), 36)}</b>")
+            detail_lines.extend(_escape_clip(line, 66) for line in fp_lines)
+            detail_lines.append("")
+
+    detail_lines.append("🧩 <b>性格速写</b>")
     sample_by_id = {sample.message_id: sample for sample in samples}
-    for trait in result.personality:
+    for trait in result.personality[:3]:
         detail_lines.extend(
             [
                 "",
-                f"<b>“{_escape_clip(trait.title, 60)}”</b>",
-                _escape_clip(trait.analysis, 300) + _render_evidence_links(trait.evidence_ids, sample_by_id),
+                f"<b>“{_escape_clip(trait.title, 42)}”</b>",
+                _escape_clip(trait.analysis, 180) + _render_evidence_links(trait.evidence_ids, sample_by_id),
             ]
         )
 
     detail_lines.extend(["", "🎯 <b>兴趣与话题</b>"])
-    for item in result.interests:
-        line = f"• <b>{_escape_clip(item.topic, 60)}</b>"
+    for item in result.interests[:5]:
+        line = f"• <b>{_escape_clip(item.topic, 34)}</b>"
         if item.detail:
-            line += f" — {_escape_clip(item.detail, 100)}"
+            line += f" — {_escape_clip(item.detail, 60)}"
         detail_lines.append(line)
 
     detail_lines.extend(["", "💬 <b>代表语录</b>"])
-    for quote in result.quotes:
+    for quote in result.quotes[:3]:
         link = _message_anchor(quote.link)
-        detail_lines.extend(["", f"“{_escape_clip(quote.text, 120)}”{link}"])
+        detail_lines.append("")
+        if quote.reply_context:
+            detail_lines.append(f"<i>↪ 回「{_escape_clip(quote.reply_context, 34)}」</i>")
+        detail_lines.append(f"“{_escape_clip(quote.text, 96)}”{link}")
         if quote.comment:
-            detail_lines.append(f"<i>—— {_escape_clip(quote.comment, 100)}</i>")
+            detail_lines.append(f"<i>—— {_escape_clip(quote.comment, 68)}</i>")
 
     detail_lines.extend(["", "⭐ <b>总评</b>"])
-    detail_lines.extend(f"• {_escape_clip(item, 90)}" for item in result.verdict)
+    detail_lines.extend(f"• {_escape_clip(item, 64)}" for item in result.verdict[:4])
     if result.closing:
-        detail_lines.extend(["", _escape_clip(result.closing, 140)])
+        detail_lines.extend(["", _escape_clip(result.closing, 100)])
 
     token_text = f"{max(int(total_tokens or 0), 0):,} tokens" if total_tokens else "tokens 未返回"
+    archetype_line = f"🎭 <b>{_escape_clip(result.archetype, 44)}</b>\n" if result.archetype else ""
     rendered = (
         f"<b>👤 用户画像：{_escape_clip(target_label, 64)}</b>\n"
         f"<code>样本 {len(samples)} 条</code> ｜ <code>时间范围 {format_sample_date_range(samples)}</code>\n"
-        f"<blockquote>{_escape_clip(result.tagline, 140)}</blockquote>\n"
+        f"{archetype_line}"
+        f"<blockquote>{_escape_clip(result.tagline, 130)}</blockquote>\n"
         "<i>点击展开详情</i>\n"
         "<blockquote expandable>"
         + "\n".join(detail_lines)
@@ -1826,19 +2273,32 @@ def render_profile_rich_markdown(
     samples: list[ProfileSample],
     model: str,
     total_tokens: int,
+    analytics: ProfileAnalytics | None = None,
 ) -> str:
     sample_by_id = {sample.message_id: sample for sample in samples}
     lines = [
         f"# 👤 用户画像：{_escape_rich_markdown(target_label)}",
         "",
         f"样本 **{len(samples)} 条** ｜ 时间范围 **{_escape_rich_markdown(format_sample_date_range(samples))}**",
-        "",
-        f"> {_escape_rich_markdown(result.tagline)}",
-        "",
-        "<details open><summary>点击展开详情</summary>",
-        "",
-        "## 🧩 性格速写",
     ]
+    if result.archetype:
+        lines.extend(["", f"🎭 **{_escape_rich_markdown(result.archetype)}**"])
+    lines.extend(
+        [
+            "",
+            f"> {_escape_rich_markdown(result.tagline)}",
+            "",
+            "<details open><summary>点击展开详情</summary>",
+        ]
+    )
+
+    if analytics is not None:
+        fp_lines = format_analytics_display_lines(analytics)
+        if fp_lines:
+            lines.extend(["", f"## {_escape_rich_markdown(_fingerprint_heading(analytics, len(samples)))}", ""])
+            lines.extend(f"- {_escape_rich_markdown(line)}" for line in fp_lines)
+
+    lines.extend(["", "## 🧩 性格速写"])
 
     for trait in result.personality:
         lines.extend(
@@ -1870,7 +2330,10 @@ def render_profile_rich_markdown(
     lines.extend(["", "## 💬 代表语录"])
     for quote in result.quotes:
         link = _rich_message_link(quote.link)
-        lines.extend(["", f"> “{_escape_rich_markdown(quote.text)}”{link}"])
+        lines.append("")
+        if quote.reply_context:
+            lines.append(f"> ↪ 回「{_escape_rich_markdown(quote.reply_context)}」")
+        lines.append(f"> “{_escape_rich_markdown(quote.text)}”{link}")
         if quote.comment:
             lines.append(f"> —— {_escape_rich_markdown(quote.comment)}")
 
@@ -1917,6 +2380,7 @@ def build_profile_rich_message(
     model: str,
     total_tokens: int,
     rich_types: Any,
+    analytics: ProfileAnalytics | None = None,
 ) -> Any:
     def plain(value: Any) -> Any:
         return rich_types.TextPlain(text=str(value or ""))
@@ -1956,7 +2420,15 @@ def build_profile_rich_message(
         )
 
     sample_by_id = {sample.message_id: sample for sample in samples}
-    detail_blocks: list[Any] = [rich_types.PageBlockHeader(text=plain("🧩 性格速写"))]
+    detail_blocks: list[Any] = []
+    if analytics is not None:
+        fp_lines = format_analytics_display_lines(analytics)
+        if fp_lines:
+            detail_blocks.append(rich_types.PageBlockHeader(text=plain(_fingerprint_heading(analytics, len(samples)))))
+            for line in fp_lines:
+                detail_blocks.append(rich_types.PageBlockParagraph(text=plain(line)))
+
+    detail_blocks.append(rich_types.PageBlockHeader(text=plain("🧩 性格速写")))
     for trait in result.personality:
         evidence_links = [
             sample_by_id[message_id].link
@@ -1996,6 +2468,9 @@ def build_profile_rich_message(
     )
 
     for quote in result.quotes:
+        quote_body = f"“{quote.text}”"
+        if quote.reply_context:
+            quote_body = f"↪ 回「{quote.reply_context}」\n{quote_body}"
         caption = (
             rich_types.TextItalic(text=plain(f"—— {quote.comment}"))
             if quote.comment
@@ -2003,7 +2478,7 @@ def build_profile_rich_message(
         )
         detail_blocks.append(
             rich_types.PageBlockBlockquote(
-                text=linked_text(f"“{quote.text}”", [quote.link] if quote.link else []),
+                text=linked_text(quote_body, [quote.link] if quote.link else []),
                 caption=caption,
             )
         )
@@ -2040,7 +2515,7 @@ def build_profile_rich_message(
         detail_blocks.append(rich_types.PageBlockParagraph(text=plain(result.closing)))
 
     token_text = f"{max(int(total_tokens or 0), 0):,} tokens" if total_tokens else "tokens 未返回"
-    blocks = [
+    blocks: list[Any] = [
         rich_types.PageBlockTitle(text=plain(f"👤 用户画像：{target_label}")),
         rich_types.PageBlockParagraph(
             text=concat(
@@ -2051,14 +2526,24 @@ def build_profile_rich_message(
                 ]
             )
         ),
-        rich_types.PageBlockBlockquote(text=plain(result.tagline), caption=empty()),
-        rich_types.PageBlockDetails(
-            blocks=detail_blocks,
-            title=plain("点击展开详情"),
-            open=True,
-        ),
-        rich_types.PageBlockFooter(text=plain(f"Powered by {model or '未知模型'} ｜ {token_text}")),
     ]
+    if result.archetype:
+        blocks.append(
+            rich_types.PageBlockParagraph(
+                text=rich_types.TextBold(text=plain(f"🎭 {result.archetype}"))
+            )
+        )
+    blocks.extend(
+        [
+            rich_types.PageBlockBlockquote(text=plain(result.tagline), caption=empty()),
+            rich_types.PageBlockDetails(
+                blocks=detail_blocks,
+                title=plain("点击展开详情"),
+                open=True,
+            ),
+            rich_types.PageBlockFooter(text=plain(f"Powered by {model or '未知模型'} ｜ {token_text}")),
+        ]
+    )
     return rich_types.InputRichMessage(blocks=blocks, noautolink=True)
 
 
@@ -2174,6 +2659,25 @@ def _positive_int(value: Any) -> int | None:
     except (TypeError, ValueError):
         return None
     return parsed if parsed > 0 else None
+
+
+def _as_int_or_none(value: Any) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _callable_supports_parameter(func: Any, parameter: str) -> bool:
+    try:
+        params = inspect.signature(func).parameters
+    except (TypeError, ValueError):
+        return False
+    if parameter in params:
+        return True
+    return any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
 
 
 def _request_supports_parameter(request_type: Any, parameter: str) -> bool:

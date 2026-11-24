@@ -285,6 +285,114 @@ class ChatHistoryStore:
             for row in rows
         ]
 
+    def get_recent_chat_messages(
+        self,
+        chat_id: Any,
+        limit: int = 5000,
+    ) -> list[StoredChatMessage]:
+        """Return recent messages in one chat using the primary key index."""
+        if not self.config.enabled or not self.path.exists():
+            return []
+        numeric_chat_id = _as_int(chat_id)
+        if numeric_chat_id is None:
+            return []
+        bounded_limit = max(1, int(limit))
+        with self._lock:
+            if self._closed:
+                return []
+            rows = self._connect().execute(
+                """
+                SELECT
+                    chat_id,
+                    message_id,
+                    sender_id,
+                    sent_at,
+                    edited_at,
+                    text,
+                    is_outgoing,
+                    reply_to_message_id
+                FROM chat_messages
+                WHERE chat_id = ?
+                ORDER BY message_id DESC
+                LIMIT ?
+                """,
+                (numeric_chat_id, bounded_limit),
+            ).fetchall()
+        messages = [
+            StoredChatMessage(
+                chat_id=int(row[0]),
+                message_id=int(row[1]),
+                sender_id=int(row[2]) if row[2] is not None else None,
+                sent_at=_from_timestamp(row[3]),
+                edited_at=_from_timestamp(row[4]),
+                text=str(row[5]),
+                is_outgoing=bool(row[6]),
+                reply_to_message_id=int(row[7]) if row[7] is not None else None,
+            )
+            for row in rows
+        ]
+        messages.reverse()
+        return messages
+
+    def get_messages_by_ids(
+        self,
+        chat_id: Any,
+        message_ids: list[int],
+    ) -> dict[int, StoredChatMessage]:
+        """Batch lookup messages in one chat by primary key."""
+        if not self.config.enabled or not self.path.exists():
+            return {}
+        numeric_chat_id = _as_int(chat_id)
+        if numeric_chat_id is None:
+            return {}
+        unique_ids = list(
+            dict.fromkeys(
+                parsed
+                for value in message_ids
+                if (parsed := _as_int(value)) is not None and parsed > 0
+            )
+        )
+        if not unique_ids:
+            return {}
+        result: dict[int, StoredChatMessage] = {}
+        with self._lock:
+            if self._closed:
+                return {}
+            connection = self._connect()
+            batch_size = 500
+            for start in range(0, len(unique_ids), batch_size):
+                batch = unique_ids[start : start + batch_size]
+                placeholders = ",".join("?" for _ in batch)
+                rows = connection.execute(
+                    f"""
+                    SELECT
+                        chat_id,
+                        message_id,
+                        sender_id,
+                        sent_at,
+                        edited_at,
+                        text,
+                        is_outgoing,
+                        reply_to_message_id
+                    FROM chat_messages
+                    WHERE chat_id = ? AND message_id IN ({placeholders})
+                    """,
+                    (numeric_chat_id, *batch),
+                ).fetchall()
+                for row in rows:
+                    item = StoredChatMessage(
+                        chat_id=int(row[0]),
+                        message_id=int(row[1]),
+                        sender_id=int(row[2]) if row[2] is not None else None,
+                        sent_at=_from_timestamp(row[3]),
+                        edited_at=_from_timestamp(row[4]),
+                        text=str(row[5]),
+                        is_outgoing=bool(row[6]),
+                        reply_to_message_id=int(row[7]) if row[7] is not None else None,
+                    )
+                    result[item.message_id] = item
+        return result
+
     def mark_backfill_started(self, chat_id: Any) -> None:
         numeric_chat_id = _required_int(chat_id, "chat_id")
         now = time.time()

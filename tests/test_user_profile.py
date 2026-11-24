@@ -4,7 +4,7 @@ import asyncio
 import html
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
@@ -12,6 +12,7 @@ from telegram_bot.config import AIConfig, AIProviderConfig, ChatHistoryConfig, T
 from telegram_bot.modules import user_profile as user_profile_module
 from telegram_bot.modules.base import ModuleCard
 from telegram_bot.modules.user_profile import (
+    PROFILE_EXTRACT_SYSTEM_PROMPT,
     ProfileCommand,
     ProfileSample,
     UserProfileModule,
@@ -19,9 +20,18 @@ from telegram_bot.modules.user_profile import (
     build_profile_prompt,
     build_profile_rich_message,
     extract_profile_command,
+    normalize_chunk_extract,
     normalize_profile_result,
     render_profile_html,
     render_profile_rich_markdown,
+)
+from telegram_bot.modules.user_profile_analytics import (
+    compute_profile_analytics,
+    extract_catchphrases,
+    extract_distinctive_terms,
+    filter_noise_samples,
+    select_informative_samples,
+    with_resolved_peer_labels,
 )
 from telegram_bot.persistence import ChatHistoryStore
 
@@ -832,6 +842,296 @@ def test_profile_final_edit_failure_sends_result_as_fallback() -> None:
     assert result.status == "handled"
     assert event.client.sent
     assert "用户画像：@fallback_user" in event.client.sent[-1].raw_text
+
+
+def test_noise_filter_drops_bot_commands_and_rituals_with_fallback() -> None:
+    mixed = [
+        _sample(1, "/scratch"),
+        _sample(2, "/lucky_draw_10@example_bot"),
+        _sample(3, "-re"),
+        _sample(4, "签到"),
+        _sample(5, "+1"),
+        _sample(6, "笑死，这反代居然通了"),
+        _sample(7, "确实，我刚也踩坑了"),
+        _sample(8, "docker 镜像怎么拉不动"),
+    ]
+    kept, filtered, bot_cnt, ritual_cnt = filter_noise_samples(mixed, min_required=3)
+    assert [s.message_id for s in kept] == [6, 7, 8]
+    assert filtered == 5
+    assert bot_cnt == 3
+    assert ritual_cnt == 2
+
+    # 不足 min_required 时自动回退保留原样本，但保留 bot/ritual 计数用于指纹展示
+    kept_fb, filtered_fb, bot_fb, ritual_fb = filter_noise_samples(mixed, min_required=6)
+    assert len(kept_fb) == len(mixed)
+    assert filtered_fb == 0
+    assert bot_fb == 3
+    assert ritual_fb == 2
+
+
+def test_distinctive_terms_and_catchphrases_separate_user_from_group_baseline() -> None:
+    group_bg = [
+        "今天群里抢红包手气怎么样",
+        "服务器又重启了大家快看",
+        "今天吃什么外卖比较划算",
+        "群里最近真热闹啊哈哈哈",
+    ] * 25
+    user_texts = [
+        "我的 emby 刮削器又挂了，反代配置报错",
+        "折腾了一晚上 emby 和 docker 反代终于通了",
+        "刚换了反代节点，emby 播放速度起飞",
+        "复制打开抖音看看【某博主】的作品，docker 教程不错",
+        "女子推理社最新一期太好看了，王楚然真绝",
+        "女子推理社这期推理太烧脑了",
+        "也是没品",
+        "也是没品",
+        "也是没品",
+        "哈哈哈",
+        "哈哈哈",
+        "哈哈哈",
+    ]
+    terms = extract_distinctive_terms(user_texts, group_bg, top_k=6)
+    catchphrases = extract_catchphrases(user_texts, group_bg, top_k=3)
+
+    assert "emby" in terms
+    assert "反代" in terms
+    assert not any("复制打开" in t or "制打开抖" in t for t in terms)
+    # 重叠碎片不会重复同时出现
+    assert sum(1 for t in terms if "推理" in t) <= 1
+    assert "也是没品" in catchphrases
+    assert "哈哈哈" not in catchphrases
+
+
+def test_analytics_computes_schedule_baseline_percentiles_and_social_peers() -> None:
+    # 构造北京时间工作日上午 11:00（UTC 03:00）的摸鱼党样本 + 跨群 + 回复关系
+    base_utc = datetime(2026, 7, 6, 3, 0, tzinfo=timezone.utc)  # 周一 11:00 CST
+    user_samples = [
+        ProfileSample(
+            message_id=idx,
+            date=base_utc + timedelta(days=idx),
+            text="反代 docker 报错怎么排查？" if idx % 2 == 0 else "emby 刮削真香",
+            kind="text",
+            source_label="技术群" if idx <= 40 else "水群",
+            chat_id=-1001 if idx <= 40 else -1002,
+            raw_message_id=idx,
+            reply_to_message_id=100 + idx if idx % 3 == 0 else None,
+            reply_context="有人会配 nginx 吗" if idx % 3 == 0 else "",
+            reply_to_sender_id=200 if idx % 3 == 0 else None,
+        )
+        for idx in range(1, 65)
+    ]
+    # 本群背景：5 位不同群友，含 1 位经常回复目标用户（且含跨群同 message_id 不应串群）
+    group_recent = []
+    for peer_id in (200, 201, 202, 203, 204):
+        for k in range(10):
+            group_recent.append(
+                SimpleNamespace(
+                    chat_id=-1001,
+                    message_id=500 + peer_id * 10 + k,
+                    sender_id=peer_id,
+                    sent_at=datetime(2026, 7, 6, 15, 0, tzinfo=timezone.utc) + timedelta(minutes=k),  # 23:00 CST
+                    text="普通水群聊天消息长度比较一般啊" * (1 + peer_id % 3),
+                    reply_to_message_id=(1 if (peer_id == 201 and k < 3) else (45 if peer_id == 202 and k < 3 else None)),
+                )
+            )
+    analytics = compute_profile_analytics(
+        user_samples,
+        target_user_id=88,
+        group_recent_messages=group_recent,
+    )
+    analytics = with_resolved_peer_labels(analytics, {200: ("@alice", False), 201: ("@bob", False)})
+
+    assert analytics.peak_hour == 11
+    assert analytics.workday_ratio > 0.6
+    assert analytics.night_ratio == 0.0
+    assert analytics.baseline is not None
+    assert analytics.baseline.active_users >= 4
+    assert analytics.baseline.length_percentile is not None
+    assert len(analytics.group_breakdown) == 2
+    assert analytics.timeline_shift is not None
+    assert any(p.label == "@alice" for p in analytics.top_replied_to)
+    # peer 201 回复了 chat -1001 的 msg 1，应统计；peer 202 回复了 msg 45（属于 chat -1002），不得串群误计
+    assert any(p.label == "@bob" for p in analytics.top_replied_by)
+    assert all(p.user_id != 202 for p in analytics.top_replied_by)
+    assert "熬夜浓度" in analytics.rating_anchors
+
+
+def test_informative_sample_selection_prefers_distinctive_and_replied_messages() -> None:
+    samples = []
+    for idx in range(1, 61):
+        if idx in (15, 35, 50):
+            samples.append(
+                ProfileSample(
+                    message_id=idx,
+                    date=datetime(2026, 7, 1, tzinfo=timezone.utc) + timedelta(hours=idx),
+                    text="刚排查完 docker 反代证书续签失败的原因，居然是端口被占用了",
+                    kind="text",
+                    reply_context="证书又过期了怎么办",
+                )
+            )
+        else:
+            samples.append(_sample(idx, "嗯"))
+    chosen = select_informative_samples(samples, 6, distinctive_terms=["docker", "反代"])
+    chosen_ids = {s.message_id for s in chosen}
+    assert 1 in chosen_ids and 60 in chosen_ids
+    assert {15, 35, 50}.issubset(chosen_ids)
+
+
+def test_all_history_two_stage_map_reduce_hydrates_quote_text_and_passes_analytics(tmp_path) -> None:
+    target = SimpleNamespace(id=88, username="deep_user", first_name="Deep", last_name="")
+    replied = FakeMessage("hello", message_id=2, sender_id=88, sender=target, out=False)
+    command = FakeMessage("/fx local", message_id=9999, sender_id=1, out=True, reply=replied)
+    event = FakeEvent(command, [])
+    store = ChatHistoryStore(ChatHistoryConfig(database_path=str(tmp_path / "chat.sqlite3")), tmp_path)
+    # 写入被回复消息 + 足够多触发 2 个 chunk 的长消息
+    parent_msg = FakeMessage("谁懂 emby 反代报错", message_id=1, sender_id=99, out=False)
+    store.record_event(SimpleNamespace(message=parent_msg, chat_id=parent_msg.chat_id, sender_id=99))
+    user_msgs = []
+    for mid in range(2, 25):
+        msg = FakeMessage(
+            f"第{mid}条深度排障：emby 反代配置需要打开 websocket 代理 " + ("详细日志" * 20),
+            message_id=mid,
+            sender_id=88,
+            sender=target,
+            out=False,
+        )
+        msg.reply_to_msg_id = 1 if mid == 5 else None
+        user_msgs.append(msg)
+    store.record_events(user_msgs)
+    store.mark_backfill_complete(command.chat_id, 25)
+
+    captured_calls: list[tuple[str | None, str]] = []
+
+    class TwoStageStubModule(UserProfileModule):
+        async def _generate_profile(self, prompt: str, *, system_prompt: str | None = None):
+            captured_calls.append((system_prompt, prompt))
+            if system_prompt == PROFILE_EXTRACT_SYSTEM_PROMPT:
+                return (
+                    {
+                        "period": "07-02~07-24",
+                        "habits": ["排障必写详细日志"],
+                        "topics": [{"topic": "emby 反代", "stance": "坚持要开 websocket"}],
+                        "moments": [{"message_id": 5, "why": "精准回复群友报错"}],
+                        "social_style": "热衷技术排障接话",
+                        "tone_note": "理性务实",
+                    },
+                    100,
+                )
+            return (
+                {
+                    "archetype": "反代排障小作文专家",
+                    "tagline": "一见报错就写满屏排障日志的技术控。",
+                    "personality": [
+                        {"title": "日志排障狂", "analysis": "动辄分析 websocket 代理细节", "evidence_ids": [5]},
+                        {"title": "反代布道师", "analysis": "频繁提及 emby 与反代", "evidence_ids": [6]},
+                        {"title": "长文输出机", "analysis": "发言篇幅显著长于常人", "evidence_ids": [7]},
+                    ],
+                    "interests": [{"topic": "emby 反代", "detail": "重点折腾 websocket 代理"}],
+                    "quotes": [{"message_id": 5, "comment": "经典排障现场"}],
+                    "ratings": [{"dimension": "表达篇幅", "score": 5, "comment": "长文型选手"}],
+                    "verdict": ["实打实的排障主力", "几乎不水无意义短句", "回复有针对性", "风格稳定"],
+                    "closing": "群里的行走排障文档。",
+                },
+                200,
+            )
+
+    module = TwoStageStubModule(
+        ModuleCard("user_profile", "群友画像", "", "ai", enabled=True),
+        UserProfileConfig(min_required_samples=3),
+        AIConfig(),
+        tmp_path,
+        store,
+    )
+    result = asyncio.run(module.handle_message(event))
+    store.close()
+
+    assert result.status == "handled"
+    # Map 阶段使用事实提取系统提示词；Reduce 阶段拿到本地回填的真实原文、回复前情和行为指纹
+    assert captured_calls[0][0] == PROFILE_EXTRACT_SYSTEM_PROMPT
+    final_system, final_prompt = captured_calls[-1]
+    assert final_system is None
+    assert "本地客观行为指纹" in final_prompt
+    assert "第5条深度排障：emby 反代配置需要打开 websocket 代理" in final_prompt
+    assert "回:谁懂 emby 反代报错" in final_prompt
+    final_html = command.edits[-1]["text"]
+    assert "反代排障小作文专家" in final_html
+    assert "行为指纹" in final_html
+    assert "回「谁懂 emby 反代报错」" in final_html
+
+
+def test_profile_renderers_include_archetype_fingerprint_and_reply_context_within_budget() -> None:
+    samples = [
+        ProfileSample(
+            message_id=idx,
+            date=datetime(2026, 7, min(idx, 28), 3, 0, tzinfo=timezone.utc),
+            text="<&" * 200,
+            kind="text",
+            link=f"https://t.me/c/0000000001/{idx}",
+            reply_context="<&" * 40 if idx <= 3 else "",
+        )
+        for idx in range(1, 61)
+    ]
+    raw = {
+        "archetype": "<&" * 50,
+        "tagline": "<&" * 500,
+        "personality": [
+            {"title": "<&" * 100, "analysis": "<&" * 500, "evidence_ids": [1, 2, 3]}
+            for _ in range(5)
+        ],
+        "interests": [{"topic": "<&" * 100, "detail": "<&" * 500} for _ in range(6)],
+        "quotes": [{"message_id": item, "comment": "<&" * 300} for item in range(1, 6)],
+        "verdict": ["<&" * 300 for _ in range(6)],
+        "closing": "<&" * 500,
+    }
+    result = normalize_profile_result(raw, samples)
+    assert len(result.personality) == 3
+    assert len(result.interests) == 5
+    assert len(result.verdict) == 4
+    assert result.quotes[0].reply_context
+
+    analytics = compute_profile_analytics(samples)
+    rendered_html = render_profile_html(
+        result,
+        target_label="@" + "u" * 32,
+        samples=samples[:10],
+        model="model-" + "x" * 80,
+        total_tokens=999999,
+        analytics=analytics,
+    )
+    visible = html.unescape(re.sub(r"<[^>]+>", "", rendered_html))
+    assert len(rendered_html) <= 4000
+    assert len(visible) <= 3600
+    assert "行为指纹（近 60 条）" in rendered_html
+    assert "↪ 回「" in rendered_html
+
+    rendered_md = render_profile_rich_markdown(
+        result,
+        target_label="@test_user",
+        samples=samples[:10],
+        model="gpt-6-luna",
+        total_tokens=1234,
+        analytics=analytics,
+    )
+    assert "## 🧬 行为指纹（近 60 条）" in rendered_md
+    assert "🎭 **" in rendered_md
+    assert "> ↪ 回「" in rendered_md
+
+
+def test_profile_rejects_sensitive_inference_in_archetype_and_chunk_extract() -> None:
+    samples = [_sample(10, "今天好困")]
+    try:
+        normalize_profile_result({"archetype": "疑似抑郁症患者", "tagline": "普通"}, samples)
+    except ValueError as exc:
+        assert "敏感属性推断" in str(exc)
+    else:
+        raise AssertionError("archetype 中的敏感属性推断应被拒绝")
+
+    try:
+        normalize_chunk_extract({"habits": ["推测具有政治立场偏左"], "moments": [{"message_id": 10, "why": "ok"}]}, samples)
+    except ValueError as exc:
+        assert "敏感属性推断" in str(exc)
+    else:
+        raise AssertionError("Map 事实卡片中的敏感属性推断应被拒绝")
 
 
 class FakeMessage:

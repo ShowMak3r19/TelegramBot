@@ -289,3 +289,23 @@ def test_archive_initialization_failure_does_not_block_module_dispatch(tmp_path:
     assert dispatched == [event]
     assert app.metrics.messages_seen == 1
     app.chat_history.close()
+
+
+def test_chat_history_recent_messages_and_batch_lookup_by_ids(tmp_path: Path) -> None:
+    store = ChatHistoryStore(
+        ChatHistoryConfig(database_path=str(tmp_path / "chat-history.sqlite3")),
+        tmp_path,
+    )
+    for message_id in range(1, 7):
+        store.record_event(_event(f"群A消息 {message_id}", chat_id=-1001, message_id=message_id, sender_id=10 + message_id % 2))
+    store.record_event(_event("群B消息 2", chat_id=-1002, message_id=2, sender_id=99))
+
+    recent = store.get_recent_chat_messages(-1001, limit=3)
+    assert [item.message_id for item in recent] == [4, 5, 6]
+    assert [item.text for item in recent] == ["群A消息 4", "群A消息 5", "群A消息 6"]
+
+    found = store.get_messages_by_ids(-1001, [2, 5, 999, 2])
+    assert sorted(found) == [2, 5]
+    assert found[2].text == "群A消息 2"
+    assert found[5].text == "群A消息 5"
+    store.close()
