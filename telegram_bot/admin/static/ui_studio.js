@@ -468,9 +468,9 @@
       const bgRgb = hslToRgb(hue, Math.min(14, surfSat), 97);
       const glassRgb = hslToRgb(hue, Math.min(10, surfSat), 99);
       const elevRgb = [255, 255, 255];
-      const insetRgb = hslToRgb(hue, Math.min(14, surfSat), 93);
-      const mutRgb = hslToRgb(hue, Math.min(22, surfSat + 8), 40);
-      const faintRgb = hslToRgb(hue, Math.min(18, surfSat + 4), 56);
+      const insetRgb = hslToRgb(hue, Math.min(10, surfSat), 99);
+      const mutRgb = hslToRgb(hue, Math.min(24, surfSat + 8), 33);
+      const faintRgb = hslToRgb(hue, Math.min(18, surfSat + 4), 48);
       const bdrRgb = hslToRgb(hue, Math.min(26, surfSat + 10), 26);
 
       root.style.setProperty("--accent", rgbToHex(accRgb));
