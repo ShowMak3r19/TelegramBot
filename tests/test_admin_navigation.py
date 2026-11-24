@@ -170,6 +170,39 @@ def test_admin_module_transfer_controls_present() -> None:
     assert "moduleIcon(" not in app_js
 
 
+def test_admin_custom_icon_assets_cover_modules_and_menus() -> None:
+    admin_static = ROOT / "telegram_bot" / "admin" / "static"
+    app_js = (admin_static / "app.js").read_text(encoding="utf-8")
+    icons_dir = admin_static / "assets" / "icons"
+
+    match = re.search(r"const CUSTOM_ICON_ASSETS = \{(?P<body>.*?)\};", app_js, re.S)
+    assert match is not None, "CUSTOM_ICON_ASSETS is missing from admin app.js"
+    asset_map = dict(re.findall(r"([a-zA-Z0-9_]+):\s*\"([^\"]+)\"", match.group("body")))
+
+    registered_module_ids = {card["id"] for card in create_default_registry(AppConfig()).cards()}
+    menu_icons = {
+        "dashboard",
+        "modules",
+        "arrange",
+        "settings",
+        "aiServices",
+        "aiUsage",
+        "logs",
+        "palette",
+        "command",
+        "spark",
+    }
+    required_keys = registered_module_ids | menu_icons
+    missing_keys = sorted(required_keys - set(asset_map))
+    assert missing_keys == [], f"Missing custom icon mappings: {missing_keys}"
+
+    for key, filename in asset_map.items():
+        asset_path = icons_dir / filename
+        assert asset_path.is_file(), f"Missing icon asset file for {key}: {asset_path}"
+        header = asset_path.read_bytes()[:8]
+        assert header == b"\x89PNG\r\n\x1a\n", f"Icon asset is not a valid PNG: {asset_path}"
+
+
 def test_admin_sections_are_balanced_and_panels_belong_to_views() -> None:
     from html.parser import HTMLParser
 

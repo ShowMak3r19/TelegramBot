@@ -49,6 +49,35 @@ const CHART_WINDOWS = {
   all: Infinity,
 };
 
+const ICON_ASSET_VERSION = "1.1.0";
+
+const CUSTOM_ICON_ASSETS = {
+  dashboard: "dashboard.png",
+  modules: "modules.png",
+  arrange: "arrange.png",
+  settings: "settings.png",
+  aiServices: "ai_services.png",
+  aiUsage: "ai_usage.png",
+  logs: "logs.png",
+  palette: "palette.png",
+  red_packet: "red_packet.png",
+  send_red_packet: "send_red_packet.png",
+  chat_games: "chat_games.png",
+  command: "command.png",
+  ai_reply: "ai_reply.png",
+  user_profile: "user_profile.png",
+  ai_image: "ai_image.png",
+  ai_decrypt: "ai_decrypt.png",
+  gif: "gif.png",
+  word_cloud: "word_cloud.png",
+  quote: "quote.png",
+  checkin: "checkin.png",
+  auto_forward: "auto_forward.png",
+  magnet_import: "magnet_import.png",
+  rex_widget_sync: "rex_widget_sync.png",
+  spark: "spark.png",
+};
+
 const ICONS = {
   dashboard: '<rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="11" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="17" width="7" height="3" rx="1.5"/>',
   modules: '<path d="M5 4h6l2 3h6v13H5z"/><path d="M8 11h8M8 15h5"/>',
@@ -84,8 +113,6 @@ const ICONS = {
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   logout: '<path d="M10 17l5-5-5-5"/><path d="M15 12H4"/><path d="M14 4h5a1.5 1.5 0 0 1 1.5 1.5v13A1.5 1.5 0 0 1 19 20h-5"/>',
   power: '<path d="M12 3v8"/><path d="M6.6 6.6a8 8 0 1 0 10.8 0"/>',
-  download: '<path d="M12 4v11"/><path d="m7.5 11.5 4.5 4.5 4.5-4.5"/><path d="M5 19h14"/>',
-  upload: '<path d="M12 16V5"/><path d="m7.5 9.5 4.5-4.5 4.5 4.5"/><path d="M5 19h14"/>',
   palette: '<circle cx="12" cy="12" r="9"/><circle cx="9" cy="10" r="1.2"/><circle cx="12.5" cy="8" r="1.2"/><circle cx="16" cy="10.5" r="1.2"/><path d="M15 15.5a2 2 0 0 1 2 2 2.5 2.5 0 0 1-2.5 2.5"/>',
   arrange: '<rect x="3" y="4" width="7" height="7" rx="1.5"/><rect x="14" y="4" width="7" height="7" rx="1.5"/><rect x="3" y="13" width="7" height="7" rx="1.5"/><path d="M14 16.5h7M17.5 13v7"/>',
   spark: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>',
@@ -499,6 +526,10 @@ function moduleIconKey(moduleId) {
 }
 
 function iconSvg(name) {
+  const asset = CUSTOM_ICON_ASSETS[name];
+  if (asset) {
+    return `<img class="ui-icon-img" src="/assets/icons/${asset}?v=${ICON_ASSET_VERSION}" alt="" decoding="async" draggable="false" />`;
+  }
   const body = ICONS[name] || ICONS.modules;
   return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${body}</svg>`;
 }
@@ -665,7 +696,7 @@ function renderDashboardKpis(data) {
   if (sidebarDot) sidebarDot.className = `pulse-dot ${connected ? "online" : "offline"}`;
   if (sidebarState) sidebarState.textContent = connected ? "Telegram 已连接" : "Telegram 未连接";
   if (topbarVersion) {
-    const versionText = project.version ? `v${project.version}` : "v1.0.0";
+    const versionText = project.version ? `v${project.version}` : "v1.1.0";
     topbarVersion.textContent = versionText;
     topbarVersion.title = `${project.name || "Telebot"} ${versionText}`;
   }
