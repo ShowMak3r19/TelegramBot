@@ -4247,7 +4247,7 @@ function initModuleTransfer() {
             ${list.map((item) => `
               <label class="transfer-item">
                 <input type="checkbox" name="${checkboxName}" value="${escapeAttr(item.id)}" ${item.checked ? "checked" : ""} />
-                <span class="transfer-item-ico">${iconSvg(moduleIcon(item.id))}</span>
+                <span class="transfer-item-ico">${iconSvg(moduleIconKey(item.id))}</span>
                 <span class="transfer-item-copy">
                   <strong>${escapeHtml(item.name)}</strong>
                   <small>${escapeHtml(item.meta || "")}</small>

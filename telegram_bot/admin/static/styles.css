@@ -787,7 +787,7 @@ kbd,
 .brand-link {
   display: flex;
   align-items: center;
-  gap: 0.68rem;
+  gap: 0.62rem;
   min-width: 0;
   flex: 1;
   min-height: 2.5rem;
@@ -795,8 +795,8 @@ kbd,
   border: 0;
   background: transparent;
   box-shadow: none;
-  justify-content: flex-start;
-  text-align: left;
+  justify-content: center;
+  text-align: center;
   color: var(--ink);
 }
 
@@ -828,16 +828,16 @@ kbd,
 
 .brand-copy {
   min-width: 0;
-  flex: 1;
+  flex: 0 1 auto;
   display: flex;
   align-items: center;
 }
 
 .brand-copy strong {
   display: block;
-  font-size: 1.08rem;
+  font-size: 1.12rem;
   font-weight: 760;
-  letter-spacing: -0.02em;
+  letter-spacing: 0.01em;
   color: var(--ink);
   line-height: 1;
   white-space: nowrap;

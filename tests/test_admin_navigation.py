@@ -166,6 +166,8 @@ def test_admin_module_transfer_controls_present() -> None:
     assert '"/api/modules/export"' in app_js
     assert '"/api/modules/import"' in app_js
     assert "initModuleTransfer" in app_js
+    assert "moduleIconKey(item.id)" in app_js
+    assert "moduleIcon(" not in app_js
 
 
 def test_admin_sections_are_balanced_and_panels_belong_to_views() -> None:
