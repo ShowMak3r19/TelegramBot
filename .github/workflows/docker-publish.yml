@@ -9,6 +9,7 @@ on:
       - ".dockerignore"
       - "requirements.txt"
       - "config.example.json"
+      - "scripts/avdb/**"
       - "telegram_bot/**"
       - ".github/workflows/docker-publish.yml"
     tags:

@@ -32,8 +32,10 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY telegram_bot /app/telegram_bot
 COPY config.example.json /app/config.example.json
+COPY scripts/avdb/resource_to_csv.sh /app/scripts/avdb/resource_to_csv.sh
 
-RUN mkdir -p /app/config /app/sessions /app/runtime/data /app/runtime/logs /app/runtime/tmp
+RUN chmod +x /app/scripts/avdb/resource_to_csv.sh \
+    && mkdir -p /app/config /app/sessions /app/runtime/data /app/runtime/logs /app/runtime/tmp
 
 EXPOSE 8088
 

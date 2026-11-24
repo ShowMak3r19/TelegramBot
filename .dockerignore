@@ -22,7 +22,10 @@ output/
 tests/
 docs/
 deploy/
-scripts/
+scripts/*
+!scripts/avdb/
+scripts/avdb/*
+!scripts/avdb/resource_to_csv.sh
 .learnings/
 .playwright-cli/
 _tmp_*/
