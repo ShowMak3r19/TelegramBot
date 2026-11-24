@@ -4,8 +4,10 @@ import asyncio
 import base64
 import hashlib
 import html
+import io
 import logging
 import re
+import secrets
 import shutil
 import subprocess
 import tempfile
@@ -19,10 +21,12 @@ from telegram_bot.shared.contracts import HandlerResult
 from telegram_bot.shared.telegram_io import (
     event_message,
     get_reply_message,
+    is_edited_event,
     is_outgoing,
     message_text,
     safe_delete_message,
     safe_edit_message,
+    safe_filename_component,
     unlink_quietly,
 )
 
@@ -55,7 +59,7 @@ class QuoteModule:
         self.card.status = "stopped"
 
     async def handle_message(self, event: Any) -> HandlerResult:
-        if not is_outgoing(event):
+        if is_edited_event(event) or not is_outgoing(event):
             return HandlerResult.ignored(self.card.id)
         message = event_message(event)
         parsed = parse_quote_command(message_text(message or event), self.config.command_prefixes)
@@ -204,7 +208,10 @@ class QuoteModule:
         self.tmp_dir.mkdir(parents=True, exist_ok=True)
         animated = quote_api.is_webm(buffer)
         ext = "webm" if animated else "webp"
-        out_path = self.tmp_dir / f"quote_{chat_id}_{getattr(message, 'id', 'm')}.{ext}"
+        out_path = self.tmp_dir / (
+            f"quote_{safe_filename_component(str(chat_id), 'chat')}_"
+            f"{safe_filename_component(str(getattr(message, 'id', 'm')), 'm')}_{secrets.token_hex(4)}.{ext}"
+        )
         try:
             out_path.write_bytes(buffer)
             attributes = [tl_types.DocumentAttributeSticker(alt=STICKER_EMOJI, stickerset=tl_types.InputStickerSetEmpty())]
@@ -255,7 +262,27 @@ class QuoteModule:
             if not buffer:
                 await safe_edit_message(message, "❌ 下载图片失败")
                 return
-            document = await client.upload_file(buffer, file_name="sticker.png")
+            png_bytes = await asyncio.to_thread(_prepare_sticker_png, buffer)
+            uploaded = await client.upload_file(png_bytes, file_name="sticker.png")
+            media_result = await client(
+                tl_functions.messages.UploadMediaRequest(
+                    peer=tl_types.InputPeerSelf(),
+                    media=tl_types.InputMediaUploadedDocument(
+                        file=uploaded,
+                        mime_type="image/png",
+                        attributes=[tl_types.DocumentAttributeFilename(file_name="sticker.png")],
+                    ),
+                )
+            )
+            uploaded_doc = getattr(media_result, "document", None)
+            if uploaded_doc is None:
+                await safe_edit_message(message, "❌ 上传贴纸图片失败")
+                return
+            document = tl_types.InputDocument(
+                id=uploaded_doc.id,
+                access_hash=uploaded_doc.access_hash,
+                file_reference=getattr(uploaded_doc, "file_reference", b"") or b"",
+            )
 
         sticker_item = tl_types.InputStickerSetItem(document=document, emoji=STICKER_EMOJI)
         stickerset = tl_types.InputStickerSetShortName(short_name=short_name)
@@ -385,8 +412,12 @@ def _strip_prefix(text: str, prefixes: list[str]) -> str | None:
             return ""
         if lowered.startswith(prefix.lower()):
             rest = stripped[len(prefix):]
-            if not rest or rest[0].isspace() or prefix.startswith("/"):
+            if not rest or rest[0].isspace():
                 return rest.strip()
+            if prefix.startswith("/") and rest.startswith("@"):
+                mention_match = re.match(r"^@[A-Za-z0-9_]+(?:\s+(.*))?$", rest, flags=re.DOTALL)
+                if mention_match:
+                    return (mention_match.group(1) or "").strip()
     return None
 
 
@@ -437,6 +468,10 @@ async def _enrich_sender(sender: Any, client: Any) -> Any:
     """
     if sender is None or client is None or not hasattr(client, "get_entity"):
         return sender
+    if type(sender).__name__ in {"Channel", "Chat", "ChannelForbidden", "ChatForbidden"} or (
+        hasattr(sender, "title") and not hasattr(sender, "first_name")
+    ):
+        return sender
     sender_id = getattr(sender, "id", None)
     if not isinstance(sender_id, int):
         return sender
@@ -456,8 +491,7 @@ async def _build_quote_user(sender: Any, client: Any, with_avatar: bool) -> dict
     username = getattr(sender, "username", "") or ""
     name = _sender_display_name(sender)
 
-    # 诊断：打印解析到的发送者真实字段，定位名字里 emoji 丢失的原因（确认后可删）
-    logger.info(
+    logger.debug(
         "QUOTE_SENDER_DEBUG type=%s id=%s first_name=%r last_name=%r name=%r username=%r emoji_status=%r",
         type(sender).__name__, user_id, first_name, last_name, name, username,
         getattr(sender, "emoji_status", None),
@@ -594,19 +628,47 @@ def _is_photo(message: Any) -> bool:
     return media is not None and media.__class__.__name__ == "MessageMediaPhoto"
 
 
+def _prepare_sticker_png(buffer: bytes) -> bytes:
+    """将图片按比例缩放到 <=512px 的 PNG，符合 Telegram 静态贴纸规格。"""
+    try:
+        from PIL import Image
+    except ImportError:
+        return buffer
+    with Image.open(io.BytesIO(buffer)) as img:
+        converted = img.convert("RGBA")
+        converted.thumbnail((512, 512))
+        out = io.BytesIO()
+        converted.save(out, format="PNG")
+        return out.getvalue()
+
+
 # ---- 媒体嵌入 ----
 
 MAX_QUOTE_MEDIA_BYTES = 25 * 1024 * 1024
 
 
 async def _build_media(message: Any) -> dict[str, Any] | None:
-    if getattr(message, "media", None) is None:
+    media = getattr(message, "media", None)
+    if media is None:
         return None
     try:
         mime = telegram_media.media_mime_type(message)
         is_sticker = telegram_media.media_has_sticker_attribute(message)
         is_tgs = telegram_media.media_is_tgs_sticker(message)
         is_motion = telegram_media.media_is_motion(message)
+        is_photo = _is_photo(message) or getattr(message, "photo", None) is not None
+        if not (
+            is_photo
+            or is_sticker
+            or is_tgs
+            or is_motion
+            or mime.startswith("image/")
+            or mime.startswith("video/")
+        ):
+            return None
+        declared_size = telegram_media.media_size_bytes(message)
+        if declared_size > MAX_QUOTE_MEDIA_BYTES:
+            return None
         buffer = await message.download_media(file=bytes)
         if not buffer or len(buffer) > MAX_QUOTE_MEDIA_BYTES:
             return None
@@ -617,7 +679,7 @@ async def _build_media(message: Any) -> dict[str, Any] | None:
             if not converted:
                 return None
             final_buffer, final_mime = converted, "video/webm"
-        elif is_motion or quote_api.is_mp4(buffer):
+        elif (is_motion or quote_api.is_mp4(buffer)) and mime != "video/webm" and not quote_api.is_webm(buffer):
             converted = await asyncio.to_thread(_convert_to_webm, buffer, telegram_media.media_file_suffix(message))
             if converted:
                 final_buffer, final_mime = converted, "video/webm"

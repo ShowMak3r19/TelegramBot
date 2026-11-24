@@ -1,650 +1,1512 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark" data-density="comfortable">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>TelegramBot 控制台</title>
-    <meta name="application-name" content="TelegramBot" />
-    <meta name="apple-mobile-web-app-title" content="TelegramBot" />
+    <title>Telebot 控制台</title>
+    <meta name="application-name" content="Telebot" />
+    <meta name="apple-mobile-web-app-title" content="Telebot" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="theme-color" content="#008ee8" />
-    <link rel="icon" href="/assets/telegrambot-logo.svg" type="image/svg+xml" />
-    <link rel="icon" href="/assets/favicon-32.png" sizes="32x32" type="image/png" />
-    <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" sizes="180x180" />
-    <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="stylesheet" href="/styles.css" />
+    <meta name="theme-color" content="#110e0d" />
+    <link rel="icon" href="/assets/telegrambot-logo.png?v=20261124" type="image/png" />
+    <link rel="icon" href="/assets/favicon-32.png?v=20261124" sizes="32x32" type="image/png" />
+    <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png?v=20261124" sizes="180x180" />
+    <link rel="manifest" href="/manifest.webmanifest?v=20261124" />
+    <script>
+      (() => {
+        try {
+          const root = document.documentElement;
+          const savedTheme = localStorage.getItem("telegrambot.admin.theme.v1");
+          const theme = savedTheme === "light" || savedTheme === "dark" ? savedTheme : "dark";
+          root.dataset.theme = theme;
+          const savedDensity = localStorage.getItem("telegrambot.admin.density.v1");
+          if (savedDensity === "compact" || savedDensity === "comfortable" || savedDensity === "spacious") {
+            root.dataset.density = savedDensity;
+          }
+          if (localStorage.getItem("telegrambot.admin.sidebar.v1") === "collapsed") {
+            root.dataset.sidebar = "collapsed";
+          }
+          const rawPrefs = localStorage.getItem("telegrambot.admin.uiPrefs.v1");
+          if (rawPrefs) {
+            const prefs = JSON.parse(rawPrefs);
+            const app = prefs && typeof prefs === "object" ? prefs.appearance : null;
+            if (app && typeof app === "object") {
+              if (app.accent) root.dataset.accent = app.accent;
+              if (app.wallpaperType) root.dataset.wallpaperType = app.wallpaperType;
+              if (app.wallpaperPreset) root.dataset.wallpaperPreset = app.wallpaperPreset;
+              if (app.ambientEffect) root.dataset.ambient = app.ambientEffect;
+              if (typeof app.wallpaperOpacity === "number") {
+                root.style.setProperty("--wallpaper-opacity", String(Math.max(0, Math.min(1, app.wallpaperOpacity / 100))));
+              }
+              if (typeof app.glassOpacity === "number") {
+                root.style.setProperty("--glass-alpha", String(Math.max(0.2, Math.min(0.95, app.glassOpacity / 100))));
+              }
+              if (typeof app.glassBlur === "number") {
+                root.style.setProperty("--glass-blur", `${Math.max(0, Math.min(36, app.glassBlur))}px`);
+              }
+            }
+          }
+        } catch (_e) {}
+      })();
+    </script>
+    <link rel="stylesheet" href="/styles.css?v=20261124c" />
   </head>
   <body>
-    <aside class="sidebar">
-      <div class="brand">
-        <span class="brand-mark"><img src="/assets/telegrambot-logo.svg" alt="" /></span>
-        <div>
-          <strong>TelegramBot</strong>
-          <small>NAS 控制台</small>
-        </div>
-      </div>
-      <nav class="side-nav">
-        <button class="nav-item active" data-view="dashboard"><span class="nav-ico" data-icon="dashboard"></span><span>仪表盘</span></button>
-        <div class="nav-group expanded" data-group="modules">
-          <button class="nav-item nav-parent" data-view="modules">
-            <span class="nav-ico" data-icon="modules"></span><span>功能模块</span><span class="chevron" data-icon="chevronUp" title="展开/收起"></span>
-          </button>
-          <div class="sub-nav">
-            <button class="sub-nav-item" data-view="moduleRedPacket"><span class="nav-ico" data-icon="red_packet"></span><span>自动抢红包</span></button>
-            <button class="sub-nav-item" data-view="moduleSendRedPacket"><span class="nav-ico" data-icon="send_red_packet"></span><span>发红包</span></button>
-            <button class="sub-nav-item" data-view="moduleAiReply"><span class="nav-ico" data-icon="ai_reply"></span><span>AI 自动回复</span></button>
-            <button class="sub-nav-item" data-view="moduleUserProfile"><span class="nav-ico" data-icon="user_profile"></span><span>群友画像</span></button>
-            <button class="sub-nav-item" data-view="moduleAiImage"><span class="nav-ico" data-icon="ai_image"></span><span>AI 生图</span></button>
-            <button class="sub-nav-item" data-view="moduleAiDecrypt"><span class="nav-ico" data-icon="ai_decrypt"></span><span>AI 解密</span></button>
-            <button class="sub-nav-item" data-view="moduleGif"><span class="nav-ico" data-icon="gif"></span><span>GIF动图</span></button>
-            <button class="sub-nav-item" data-view="moduleWordCloud"><span class="nav-ico" data-icon="word_cloud"></span><span>词云</span></button>
-            <button class="sub-nav-item" data-view="moduleCheckin"><span class="nav-ico" data-icon="checkin"></span><span>自动签到</span></button>
-            <button class="sub-nav-item" data-view="moduleAutoForward"><span class="nav-ico" data-icon="auto_forward"></span><span>自动转发</span></button>
-            <button class="sub-nav-item" data-view="moduleMagnetImport"><span class="nav-ico" data-icon="magnet_import"></span><span>磁力数据导入</span></button>
-            <button class="sub-nav-item" data-view="moduleQuote"><span class="nav-ico" data-icon="quote"></span><span>语录贴纸</span></button>
-            <button class="sub-nav-item" data-view="moduleChatGames"><span class="nav-ico" data-icon="chat_games"></span><span>聊天小游戏</span></button>
-          </div>
-        </div>
-        <div class="nav-group" data-group="ai">
-          <button class="nav-item nav-parent" data-view="aiServices">
-            <span class="nav-ico" data-icon="aiServices"></span><span>AI 服务</span><span class="chevron" data-icon="chevronDown" title="展开/收起"></span>
-          </button>
-          <div class="sub-nav">
-            <button class="sub-nav-item" data-view="aiServices"><span class="nav-ico" data-icon="aiServices"></span><span>服务配置</span></button>
-            <button class="sub-nav-item" data-view="aiUsage"><span class="nav-ico" data-icon="aiUsage"></span><span>用量统计</span></button>
-          </div>
-        </div>
-        <button class="nav-item" data-view="logs"><span class="nav-ico" data-icon="logs"></span><span>日志</span></button>
-        <button class="nav-item" data-view="settings"><span class="nav-ico" data-icon="settings"></span><span>系统设置</span></button>
-      </nav>
-    </aside>
+    <!-- Full-Viewport Ambient Wallpaper & Dynamic Motion Stage -->
+    <div id="ambientStage" class="ambient-stage" aria-hidden="true">
+      <div id="wallpaperLayer" class="wallpaper-layer"></div>
+      <div id="wallpaperScrim" class="wallpaper-scrim"></div>
+      <canvas id="ambientCanvas" class="ambient-canvas"></canvas>
+      <div id="cursorGlow" class="cursor-glow"></div>
+    </div>
 
-    <main class="shell">
-      <header class="topbar">
-        <div class="title-row">
-          <span id="pageIcon" class="title-icon" data-icon="dashboard"></span>
-          <div>
-            <h1 id="pageTitle">仪表盘</h1>
-            <p id="pageSubtitle">系统概览 · 实时监控</p>
-          </div>
+    <div id="sidebarBackdrop" class="sidebar-backdrop" aria-hidden="true"></div>
+
+    <div class="app-frame">
+      <!-- Muvyo-Style Split Floating Topbar -->
+      <header class="app-topbar">
+        <div class="brand-pill">
+          <button id="mobileNavToggle" class="icon-btn mobile-nav-toggle" type="button" aria-label="打开导航菜单">
+            <span class="nav-ico" data-icon="menu"></span>
+          </button>
+          <button type="button" class="brand-link" data-jump-view="dashboard" aria-label="返回仪表盘">
+            <span class="brand-mark"><img src="/assets/telegrambot-logo.png?v=20261124" alt="Telebot" /></span>
+            <span class="brand-copy">
+              <strong>Telebot</strong>
+            </span>
+          </button>
         </div>
-        <div class="top-actions">
-          <span id="serviceState" class="status-pill">启动中</span>
-          <div id="serviceMenu" class="service-menu">
-            <button id="serviceMenuToggle" class="service-menu-toggle" type="button" aria-expanded="false">
-              <span>服务控制</span>
-              <span class="menu-caret" data-icon="chevronDown"></span>
-            </button>
-            <div class="service-menu-panel" role="menu">
-              <button data-service-action="start" role="menuitem">启动</button>
-              <button data-service-action="stop" role="menuitem">停止</button>
-              <button data-service-action="restart" class="primary" role="menuitem">重启</button>
+
+        <div class="topbar-pill">
+          <button id="topbarSearchBtn" class="topbar-search-pill" type="button" title="全局搜索 (Ctrl+K)" aria-label="打开全局搜索">
+            <span class="nav-ico" data-icon="search"></span>
+            <span class="topbar-search-label">搜索模块、功能、配置…</span>
+            <kbd>Ctrl+K</kbd>
+          </button>
+
+          <div class="topbar-right-cluster">
+            <div class="topbar-status-pills">
+              <button type="button" class="topbar-meta-pill" data-jump-view="dashboard" title="Telegram 连接状态">
+                <span id="sidebarTgDot" class="pulse-dot" aria-hidden="true"></span>
+                <span id="sidebarTgState">连接中</span>
+              </button>
+              <span id="topbarVersion" class="topbar-meta-pill topbar-version-pill" title="当前版本">v0.1.0</span>
+              <div class="service-cluster">
+                <span id="serviceState" class="status-pill">启动中</span>
+                <div id="serviceMenu" class="service-menu">
+                  <button id="serviceMenuToggle" class="icon-btn topbar-action-btn service-menu-toggle" type="button" aria-expanded="false" aria-label="服务控制" title="服务控制（启动 / 停止 / 重启）">
+                    <span class="nav-ico" data-icon="power"></span>
+                  </button>
+                  <div class="service-menu-panel" role="menu">
+                    <button data-service-action="start" role="menuitem">启动服务</button>
+                    <button data-service-action="stop" role="menuitem">停止服务</button>
+                    <button data-service-action="restart" class="primary" role="menuitem">重启进程</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <span class="topbar-divider" aria-hidden="true"></span>
+
+            <div class="topbar-icon-actions">
+              <button id="topbarLogsBtn" class="icon-btn topbar-action-btn" type="button" data-jump-view="logs" title="日志中心" aria-label="打开日志中心">
+                <span class="nav-ico" data-icon="logs"></span>
+              </button>
+              <button id="themeToggle" class="theme-toggle icon-btn topbar-action-btn" type="button" aria-label="切换浅色主题" title="切换深色/浅色主题">
+                <span class="theme-icon" data-icon="sun"></span>
+              </button>
+              <button id="logoutBtn" class="icon-btn topbar-action-btn logout-btn hidden" type="button" aria-label="退出登录" title="退出登录">
+                <span class="nav-ico" data-icon="logout"></span>
+              </button>
+              <button id="topbarSkinAvatarBtn" class="topbar-skin-avatar hidden" type="button" title="当前皮肤 · 点击打开外观与背景" aria-label="当前自定义皮肤">
+                <img id="topbarSkinAvatarImg" src="" alt="" />
+              </button>
             </div>
           </div>
         </div>
       </header>
 
-      <section id="dashboard" class="view active">
-        <div class="dashboard-grid">
-          <section class="panel device-panel">
-            <div class="panel-head">
-              <h2><span>▦</span>设备信息</h2>
+      <div class="app-body">
+        <!-- Floating Detached Glass Sidebar -->
+        <aside id="sidebar" class="sidebar" aria-label="主导航">
+          <nav id="sideNav" class="side-nav">
+            <div class="nav-section" data-nav-group="overview">
+              <div class="nav-section-title">仪表盘</div>
+              <button class="nav-item active" data-view="dashboard" data-tooltip="仪表盘">
+                <span class="nav-ico" data-icon="dashboard"></span>
+                <span class="nav-label">仪表盘</span>
+              </button>
+              <button class="nav-item" data-view="modules" data-tooltip="功能模块">
+                <span class="nav-ico" data-icon="modules"></span>
+                <span class="nav-label">功能模块</span>
+              </button>
             </div>
-            <dl id="deviceInfo" class="kv lines"></dl>
-          </section>
 
-          <section class="panel hardware-panel">
-            <div class="panel-head">
-              <h2><span>▣</span>硬件信息</h2>
+            <div class="nav-section" data-nav-group="interactive">
+              <div class="nav-section-title">互动与红包</div>
+              <button class="nav-item" data-view="moduleRedPacket" data-module-nav="red_packet" data-tooltip="自动抢红包">
+                <span class="nav-ico" data-icon="red_packet"></span><span class="nav-label">自动抢红包</span><span class="nav-dot" aria-hidden="true"></span>
+              </button>
+              <button class="nav-item" data-view="moduleSendRedPacket" data-module-nav="send_red_packet" data-tooltip="发红包">
+                <span class="nav-ico" data-icon="send_red_packet"></span><span class="nav-label">发红包</span><span class="nav-dot" aria-hidden="true"></span>
+              </button>
+              <button class="nav-item" data-view="moduleChatGames" data-module-nav="chat_games" data-tooltip="聊天小游戏">
+                <span class="nav-ico" data-icon="chat_games"></span><span class="nav-label">聊天小游戏</span><span class="nav-dot" aria-hidden="true"></span>
+              </button>
             </div>
-            <dl id="hardwareInfo" class="kv lines"></dl>
-            <div class="meter"><span id="diskMeter"></span></div>
-          </section>
 
-          <section class="panel resource-panel">
-            <div class="panel-head">
-              <h2><span>⌁</span>资源使用趋势</h2>
-              <div class="chart-legend">
-                <span>CPU <b id="cpuLegend">0%</b></span>
-                <span>内存 <b id="memoryLegend">0%</b></span>
+            <div class="nav-section" data-nav-group="ai">
+              <div class="nav-section-title">AI 能力</div>
+              <button class="nav-item" data-view="moduleAiReply" data-module-nav="ai_reply" data-tooltip="AI 自动回复">
+                <span class="nav-ico" data-icon="ai_reply"></span><span class="nav-label">AI 自动回复</span><span class="nav-dot" aria-hidden="true"></span>
+              </button>
+              <button class="nav-item" data-view="moduleUserProfile" data-module-nav="user_profile" data-tooltip="群友画像">
+                <span class="nav-ico" data-icon="user_profile"></span><span class="nav-label">群友画像</span><span class="nav-dot" aria-hidden="true"></span>
+              </button>
+              <button class="nav-item" data-view="moduleAiImage" data-module-nav="ai_image" data-tooltip="AI 生图">
+                <span class="nav-ico" data-icon="ai_image"></span><span class="nav-label">AI 生图</span><span class="nav-dot" aria-hidden="true"></span>
+              </button>
+              <button class="nav-item" data-view="moduleAiDecrypt" data-module-nav="ai_decrypt" data-tooltip="AI 解密">
+                <span class="nav-ico" data-icon="ai_decrypt"></span><span class="nav-label">AI 解密</span><span class="nav-dot" aria-hidden="true"></span>
+              </button>
+            </div>
+
+            <div class="nav-section" data-nav-group="media">
+              <div class="nav-section-title">媒体与效率</div>
+              <button class="nav-item" data-view="moduleGif" data-module-nav="gif" data-tooltip="GIF动图">
+                <span class="nav-ico" data-icon="gif"></span><span class="nav-label">GIF动图</span><span class="nav-dot" aria-hidden="true"></span>
+              </button>
+              <button class="nav-item" data-view="moduleWordCloud" data-module-nav="word_cloud" data-tooltip="词云">
+                <span class="nav-ico" data-icon="word_cloud"></span><span class="nav-label">词云</span><span class="nav-dot" aria-hidden="true"></span>
+              </button>
+              <button class="nav-item" data-view="moduleQuote" data-module-nav="quote" data-tooltip="语录贴纸">
+                <span class="nav-ico" data-icon="quote"></span><span class="nav-label">语录贴纸</span><span class="nav-dot" aria-hidden="true"></span>
+              </button>
+              <button class="nav-item" data-view="moduleCheckin" data-module-nav="checkin" data-tooltip="自动签到">
+                <span class="nav-ico" data-icon="checkin"></span><span class="nav-label">自动签到</span><span class="nav-dot" aria-hidden="true"></span>
+              </button>
+              <button class="nav-item" data-view="moduleAutoForward" data-module-nav="auto_forward" data-tooltip="自动转发">
+                <span class="nav-ico" data-icon="auto_forward"></span><span class="nav-label">自动转发</span><span class="nav-dot" aria-hidden="true"></span>
+              </button>
+            </div>
+
+            <div class="nav-section" data-nav-group="sync">
+              <div class="nav-section-title">同步与导入</div>
+              <button class="nav-item" data-view="moduleMagnetImport" data-module-nav="magnet_import" data-tooltip="磁力数据导入">
+                <span class="nav-ico" data-icon="magnet_import"></span><span class="nav-label">磁力数据导入</span><span class="nav-dot" aria-hidden="true"></span>
+              </button>
+              <button class="nav-item" data-view="moduleRexWidgetSync" data-module-nav="rex_widget_sync" data-tooltip="Rex 模块同步">
+                <span class="nav-ico" data-icon="rex_widget_sync"></span><span class="nav-label">Rex 模块同步</span><span class="nav-dot" aria-hidden="true"></span>
+              </button>
+            </div>
+
+            <div class="nav-section" data-nav-group="system">
+              <div class="nav-section-title">设置中心</div>
+              <button class="nav-item" data-view="sidebarArrange" data-tooltip="编排">
+                <span class="nav-ico" data-icon="arrange"></span><span class="nav-label">编排</span>
+              </button>
+              <button class="nav-item" data-view="settings" data-tooltip="配置">
+                <span class="nav-ico" data-icon="settings"></span><span class="nav-label">系统配置</span>
+              </button>
+              <button class="nav-item" data-view="aiServices" data-tooltip="AI 服务">
+                <span class="nav-ico" data-icon="aiServices"></span><span class="nav-label">AI 服务</span>
+              </button>
+              <button class="nav-item" data-view="aiUsage" data-tooltip="AI 用量">
+                <span class="nav-ico" data-icon="aiUsage"></span><span class="nav-label">AI 用量</span>
+              </button>
+            </div>
+          </nav>
+
+          <div class="sidebar-bottom-actions">
+            <button id="openCommandPalette" class="sidebar-util-btn" type="button" aria-label="功能直达 (Ctrl+K)" title="功能直达 (Ctrl+K)">
+              <span class="nav-ico" data-icon="command"></span>
+              <span class="nav-label">功能直达</span>
+              <kbd class="kbd-hint">Ctrl+K</kbd>
+            </button>
+            <button id="sidebarToggle" class="sidebar-util-btn" type="button" aria-label="折叠或展开侧边栏" title="折叠/展开侧边栏">
+              <span class="nav-ico" data-icon="sidebarToggle"></span>
+              <span class="nav-label">折叠侧栏</span>
+            </button>
+          </div>
+        </aside>
+
+        <main class="shell">
+          <div class="shell-inner">
+            <div class="view-header-bar">
+              <div class="title-row">
+                <span id="pageIcon" class="title-icon" data-icon="dashboard"></span>
+                <div class="title-copy">
+                  <div class="title-heading-line">
+                    <h1 id="pageTitle">仪表盘</h1>
+                    <span id="pageCategoryBadge" class="eyebrow-pill hidden"></span>
+                  </div>
+                  <p id="pageSubtitle">系统概览 · 实时监控</p>
+                </div>
+              </div>
+              <div class="view-header-tools">
+                <div class="density-switcher" role="group" aria-label="界面密度">
+                  <button type="button" data-density-option="compact" title="紧凑密度">紧凑</button>
+                  <button type="button" data-density-option="comfortable" class="active" title="标准密度">标准</button>
+                  <button type="button" data-density-option="spacious" title="舒适密度">舒适</button>
+                </div>
               </div>
             </div>
-            <canvas id="resourceChart" height="210"></canvas>
-            <div class="range-tabs">
-              <button class="chip active" data-chart-window="15m">15 分钟</button>
-              <button class="chip" data-chart-window="30m">30 分钟</button>
-              <button class="chip" data-chart-window="1h">1 小时</button>
-              <button class="chip" data-chart-window="2h">2 小时</button>
-              <button class="chip" data-chart-window="all">全部</button>
+
+        <!-- ==================== DASHBOARD ==================== -->
+        <section id="dashboard" class="view active view-wide">
+          <section class="panel quick-entry-panel">
+            <div class="quick-entry-head">
+              <span class="quick-entry-title"><span class="panel-glyph" data-icon="spark"></span>快捷入口</span>
+              <button type="button" class="ghost-btn compact-btn" data-jump-view="sidebarArrange">
+                <span class="nav-ico mini-ico" data-icon="arrange"></span>编排侧栏
+              </button>
+            </div>
+            <div id="dashboardQuickEntries" class="quick-entry-grid">
+              <button type="button" class="quick-entry-tile" data-jump-view="modules">
+                <span class="quick-entry-ico" data-icon="modules"></span>
+                <span>功能模块</span>
+              </button>
+              <button type="button" class="quick-entry-tile" data-jump-view="moduleRedPacket">
+                <span class="quick-entry-ico" data-icon="red_packet"></span>
+                <span>自动抢红包</span>
+              </button>
+              <button type="button" class="quick-entry-tile" data-jump-view="moduleAiReply">
+                <span class="quick-entry-ico" data-icon="ai_reply"></span>
+                <span>AI 自动回复</span>
+              </button>
+              <button type="button" class="quick-entry-tile" data-jump-view="moduleCheckin">
+                <span class="quick-entry-ico" data-icon="checkin"></span>
+                <span>自动签到</span>
+              </button>
+              <button type="button" class="quick-entry-tile" data-jump-view="aiServices">
+                <span class="quick-entry-ico" data-icon="aiServices"></span>
+                <span>AI 服务</span>
+              </button>
+              <button type="button" class="quick-entry-tile" data-open-appearance>
+                <span class="quick-entry-ico" data-icon="palette"></span>
+                <span>外观与背景</span>
+              </button>
             </div>
           </section>
 
-          <section class="panel speed-panel">
-            <div class="panel-head">
-              <h2><span>⌁</span>实时速率</h2>
-              <div class="chart-legend">
-                <span>下载 <b id="downloadLegend">0 B/s</b></span>
-                <span>上传 <b id="uploadLegend">0 B/s</b></span>
+          <div class="kpi-strip" aria-label="核心运行指标">
+            <article class="kpi-tile kpi-accent-emerald">
+              <div class="kpi-top">
+                <span class="kpi-label">Telegram 网关</span>
+                <span id="kpiTgBadge" class="mini-badge">检测中</span>
+              </div>
+              <strong id="kpiTgValue" class="kpi-value">--</strong>
+              <p id="kpiTgSub" class="kpi-sub">等待读取连接状态与监听群组</p>
+            </article>
+
+            <article class="kpi-tile kpi-accent-sky">
+              <div class="kpi-top">
+                <span class="kpi-label">消息处理吞吐</span>
+                <span id="kpiFailBadge" class="mini-badge">0 异常</span>
+              </div>
+              <strong id="kpiMsgValue" class="kpi-value">0</strong>
+              <p id="kpiMsgSub" class="kpi-sub">捕获 0 条 · 运行时长 --</p>
+            </article>
+
+            <article class="kpi-tile kpi-accent-teal" data-jump-view="modules" role="button" tabindex="0">
+              <div class="kpi-top">
+                <span class="kpi-label">功能模块活跃度</span>
+                <span class="kpi-arrow">配置 →</span>
+              </div>
+              <strong id="kpiModulesValue" class="kpi-value">0 / 14</strong>
+              <div class="kpi-progress"><span id="kpiModulesBar" style="width: 0%"></span></div>
+              <p id="kpiModulesSub" class="kpi-sub">点击进入模块中心管理开关</p>
+            </article>
+
+            <article class="kpi-tile kpi-accent-amber" data-jump-view="aiUsage" role="button" tabindex="0">
+              <div class="kpi-top">
+                <span class="kpi-label">AI 今日消耗</span>
+                <span class="kpi-arrow">明细 →</span>
+              </div>
+              <strong id="kpiAiValue" class="kpi-value">0</strong>
+              <p id="kpiAiSub" class="kpi-sub">请求 0 次 · 平均耗时 0 ms</p>
+            </article>
+          </div>
+
+          <div class="dashboard-grid">
+            <section class="panel resource-panel">
+              <div class="panel-head">
+                <div class="panel-title-wrap">
+                  <h2><span class="panel-glyph" data-icon="trend"></span>资源使用趋势</h2>
+                  <p class="panel-caption">进程 CPU 与宿主机内存实时采样</p>
+                </div>
+                <div class="panel-head-right">
+                  <div class="chart-legend">
+                    <span class="legend-item"><i class="swatch swatch-cpu"></i>CPU <b id="cpuLegend">0%</b></span>
+                    <span class="legend-item"><i class="swatch swatch-mem"></i>内存 <b id="memoryLegend">0%</b></span>
+                  </div>
+                  <div class="range-tabs" role="tablist" aria-label="时间范围">
+                    <button class="chip active" data-chart-window="15m">15m</button>
+                    <button class="chip" data-chart-window="30m">30m</button>
+                    <button class="chip" data-chart-window="1h">1h</button>
+                    <button class="chip" data-chart-window="2h">2h</button>
+                    <button class="chip" data-chart-window="all">全部</button>
+                  </div>
+                </div>
+              </div>
+              <div class="chart-stage">
+                <canvas id="resourceChart" height="230"></canvas>
+                <div id="resourceChartTooltip" class="chart-tooltip hidden" aria-hidden="true"></div>
+              </div>
+            </section>
+
+            <section class="panel speed-panel">
+              <div class="panel-head">
+                <div class="panel-title-wrap">
+                  <h2><span class="panel-glyph" data-icon="speed"></span>实时网络速率</h2>
+                  <p class="panel-caption">上行与下行吞吐监控</p>
+                </div>
+                <div class="chart-legend">
+                  <span class="legend-item"><i class="swatch swatch-down"></i>下载 <b id="downloadLegend">0 B/s</b></span>
+                  <span class="legend-item"><i class="swatch swatch-up"></i>上传 <b id="uploadLegend">0 B/s</b></span>
+                </div>
+              </div>
+              <div class="chart-stage">
+                <canvas id="speedChart" height="230"></canvas>
+                <div id="speedChartTooltip" class="chart-tooltip hidden" aria-hidden="true"></div>
+              </div>
+            </section>
+
+            <section class="panel device-panel">
+              <div class="panel-head">
+                <h2><span class="panel-glyph" data-icon="device"></span>设备信息</h2>
+              </div>
+              <dl id="deviceInfo" class="kv lines"></dl>
+            </section>
+
+            <section class="panel hardware-panel">
+              <div class="panel-head">
+                <h2><span class="panel-glyph" data-icon="hardware"></span>硬件与存储</h2>
+              </div>
+              <dl id="hardwareInfo" class="kv lines"></dl>
+              <div class="storage-bar-wrap">
+                <div class="storage-bar-label"><span>磁盘占用进度</span><b id="diskMeterValue">0%</b></div>
+                <div class="meter"><span id="diskMeter"></span></div>
+              </div>
+            </section>
+
+            <section class="panel stats-panel">
+              <div class="panel-head">
+                <h2><span class="panel-glyph" data-icon="stats"></span>实时运行统计</h2>
+              </div>
+              <dl id="statsInfo" class="kv stat-lines"></dl>
+            </section>
+
+            <section class="panel quick-modules-panel">
+              <div class="panel-head">
+                <div class="panel-title-wrap">
+                  <h2><span class="panel-glyph" data-icon="modules"></span>模块运行态速览</h2>
+                  <p class="panel-caption">点击任意模块直达配置工作台</p>
+                </div>
+                <button type="button" class="ghost-btn" data-jump-view="modules">查看全部</button>
+              </div>
+              <div id="dashboardQuickModules" class="quick-modules-grid"></div>
+            </section>
+          </div>
+        </section>
+
+        <!-- ==================== MODULES HUB ==================== -->
+        <section id="modules" class="view view-wide">
+          <div class="hub-toolbar">
+            <div class="segmented-bar" id="moduleCategoryFilter" role="tablist" aria-label="模块分类筛选">
+              <button type="button" class="seg-btn active" data-module-cat="all">全部模块</button>
+              <button type="button" class="seg-btn" data-module-cat="interactive">互动与红包</button>
+              <button type="button" class="seg-btn" data-module-cat="ai">AI 能力</button>
+              <button type="button" class="seg-btn" data-module-cat="media">媒体与效率</button>
+              <button type="button" class="seg-btn" data-module-cat="sync">同步与导入</button>
+            </div>
+            <div class="hub-toolbar-right">
+              <div class="segmented-bar compact" id="moduleStatusFilter" role="tablist" aria-label="启用状态筛选">
+                <button type="button" class="seg-btn active" data-module-state="all">全部</button>
+                <button type="button" class="seg-btn" data-module-state="enabled">已启用</button>
+                <button type="button" class="seg-btn" data-module-state="disabled">未启用</button>
+              </div>
+              <div class="search-input-wrap">
+                <span class="nav-ico" data-icon="search"></span>
+                <input id="moduleSearchInput" type="search" placeholder="筛选模块名称或用途..." autocomplete="off" />
               </div>
             </div>
-            <canvas id="speedChart" height="250"></canvas>
-          </section>
-
-          <section class="panel stats-panel">
-            <div class="panel-head">
-              <h2><span>▥</span>统计信息</h2>
-            </div>
-            <dl id="statsInfo" class="kv stat-lines"></dl>
-          </section>
-        </div>
-      </section>
-
-      <section id="modules" class="view">
-        <div id="moduleCards" class="module-grid"></div>
-      </section>
-
-      <section id="moduleRedPacket" class="view">
-        <section id="moduleRedPacketConfig" class="panel detail-panel"></section>
-      </section>
-
-      <section id="moduleSendRedPacket" class="view">
-        <section class="panel ai-config-panel">
-          <div class="panel-head">
-            <div>
-              <h2>发红包</h2>
-              <p class="hint">这里管理发红包模板。当前第一种是拼手气口令红包，后续可以继续增加完全不同类型的红包玩法。</p>
-            </div>
-            <button id="addSendRedPacketTemplate">新增模板</button>
           </div>
-          <form id="sendRedPacketSettingsForm" class="setting-form ai-setting-form">
-            <label><span>红包 ID 长度</span><input name="id_length" type="number" min="4" max="12" step="1"></label>
-            <label><span>最大同时红包</span><input name="max_active_packets" type="number" min="1" max="200" step="1"></label>
-            <label><span>普通群单包下限</span><input name="min_packet_amount" type="number" min="2" max="1000000" step="1"></label>
-            <label><span>严格群单包下限</span><input name="strict_min_packet_amount" type="number" min="2" max="1000000" step="1"></label>
-            <label class="wide-field"><span>严格下限群 ID</span><textarea name="strict_min_packet_group_ids" rows="3" placeholder="-1000000000001"></textarea></label>
-            <label class="wide-field"><span>状态文件</span><input name="state_store" type="text" placeholder="runtime/data/send_red_packet_state.json"></label>
-          </form>
-          <div id="sendRedPacketTemplates" class="template-list"></div>
-          <div class="gif-help">
-            <span class="tag">例：红包 10000 10 哈哈哈</span>
-            <span class="tag">例：/红包 10000 10 /start</span>
-            <span class="tag">自己发的红包不会被自动抢红包领取</span>
-          </div>
-          <div class="ai-save-panel inline-save">
-            <button id="saveSendRedPacketConfig" class="primary">保存发红包配置</button>
-            <span id="sendRedPacketSaveState" class="hint">保存后新的发红包请求会实时使用新配置。</span>
-          </div>
+          <div id="moduleCards" class="module-grid"></div>
         </section>
-      </section>
 
-      <section id="moduleAiReply" class="view">
-        <section class="panel ai-config-panel">
-          <div class="panel-head">
-            <div>
-              <h2>AI 自动回复</h2>
-              <p class="hint">触发词、上下文、模型参数分别配置；保存后新请求实时生效。</p>
-            </div>
-          </div>
-          <form id="replySettingsForm" class="setting-form ai-setting-form">
-            <label class="wide-field"><span>系统提示词</span><textarea name="system_prompt" rows="3"></textarea></label>
-            <label><span>命令前缀</span><textarea name="command_prefixes" rows="3" placeholder="/ai&#10;.ai"></textarea></label>
-            <label><span>唤醒词</span><textarea name="wake_words" rows="3" placeholder="@ai&#10;喂AI&#10;问AI"></textarea></label>
-            <label><span>回复触发词</span><textarea name="reply_triggers" rows="3" placeholder="ai&#10;回答&#10;解释"></textarea></label>
-            <label><span>上下文条数</span><input name="context_limit" type="number" min="0" step="1"></label>
-            <label><span>超时秒数</span><input name="timeout_seconds" type="number" min="5" step="1"></label>
-            <label><span>最大 Tokens</span><input name="max_tokens" type="number" min="256" step="256"></label>
-            <label><span>Temperature</span><input name="temperature" type="number" min="0" max="2" step="0.1"></label>
-            <label><span>Reasoning</span><select name="reasoning_effort"><option value="none">none</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option></select></label>
-            <label><span>文本详略</span><select name="text_verbosity"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label>
-            <label><span>图片细节</span><select name="image_detail"><option value="low">low</option><option value="high">high</option><option value="auto">auto</option><option value="original">original</option></select></label>
-            <label class="inline-setting"><span>联网搜索</span><input name="web_search" type="checkbox"></label>
-            <label class="inline-setting"><span>思考摘要</span><input name="reasoning_summary" type="checkbox"></label>
-            <label class="inline-setting"><span>/msg 信息查看</span><input name="message_info_enabled" type="checkbox"></label>
-            <label><span>/msg 命令</span><textarea name="message_info_command_prefixes" rows="2" placeholder="/msg"></textarea></label>
-            <label><span>设置文件</span><input name="settings_store" type="text" placeholder="runtime/data/ai_settings.json"></label>
-          </form>
-          <div class="ai-save-panel inline-save">
-            <button id="saveAiReplyConfig" class="primary">保存自动回复配置</button>
-            <span id="aiSaveState" class="hint">修改只影响新请求，已发出的请求不会被中断。</span>
-          </div>
+        <!-- ==================== MODULE: RED PACKET ==================== -->
+        <section id="moduleRedPacket" class="view" data-module-view="red_packet">
+          <section id="moduleRedPacketConfig" class="workspace-dynamic-host"></section>
         </section>
-      </section>
 
-      <section id="moduleUserProfile" class="view">
-        <section class="panel ai-config-panel profile-config-panel">
-          <div class="panel-head">
-            <div>
-              <h2>群友画像</h2>
-              <p class="hint">抽取当前群中指定用户的近期或全部已归档发言，生成带原消息论据的 Telegram 富文本人设速写。</p>
-            </div>
-            <button id="saveUserProfileConfig" class="primary">保存画像配置</button>
-          </div>
-          <div class="profile-process" aria-label="用户画像生成流程">
-            <div><strong>01</strong><span>定位群友</span><small>回复消息或 @username</small></div>
-            <div><strong>02</strong><span>抽取样本</span><small>近期样本或数据库全量文字</small></div>
-            <div><strong>03</strong><span>AI 归纳</span><small>复用回复服务模型</small></div>
-            <div><strong>04</strong><span>富文本输出</span><small>可展开详情与原消息链接</small></div>
-          </div>
-          <div class="red-packet-summary">
-            <span id="userProfileModuleState" class="tag">模块状态</span>
-            <span class="tag">默认 40 条样本</span>
-            <span class="tag">结构化 JSON</span>
-            <span class="tag">Telegram HTML</span>
-          </div>
-          <form id="userProfileSettingsForm" class="setting-form ai-setting-form">
-            <label><span>触发命令</span><textarea name="command_prefixes" rows="5" placeholder="/profile&#10;/fx&#10;.fx&#10;画像&#10;用户画像"></textarea></label>
-            <label><span>默认样本数</span><input name="default_sample_size" type="number" min="3" max="2000" step="1"></label>
-            <label><span>命令可用最小样本数</span><input name="min_sample_size" type="number" min="3" max="2000" step="1"></label>
-            <label><span>命令可用最大样本数</span><input name="max_sample_size" type="number" min="10" max="2000" step="1"></label>
-            <label><span>生成所需最少样本</span><input name="min_required_samples" type="number" min="3" max="2000" step="1"></label>
-            <label><span>AI 超时秒数</span><input name="timeout_seconds" type="number" min="5" max="600" step="1"></label>
-            <label><span>最大输出 Tokens</span><input name="max_tokens" type="number" min="512" max="12000" step="128"></label>
-            <div class="inline-setting"><span>消息进度</span><small class="hint">命令会原地改为“分析中”，随后继续更新为画像结果；编辑失败时自动补发结果。</small></div>
-            <label class="wide-field"><span>画像写作风格</span><textarea name="style_prompt" rows="4" placeholder="毒舌、有梗、敢吐槽，允许适度夸张……"></textarea><small class="hint">可以像群友互损一样起外号、玩反差，但敏感属性、恶意羞辱、外貌攻击、诊断性标签和伪造引用始终被禁止。</small></label>
-          </form>
-          <div class="gif-help">
-            <span class="tag">回复某人：/profile</span>
-            <span class="tag">回复某人：/profile 80</span>
-            <span class="tag">指定用户：/profile @username 60</span>
-            <span class="tag">跨群全部：/fx all</span>
-            <span class="tag">本群全部：/fx local</span>
-          </div>
-          <div class="profile-privacy-note">
-            <strong>样本边界</strong>
-            <p>群聊文字会保存在本地 SQLite 供分析使用，但画像结论和派生标签不会持久化，不在本地建立持久用户档案。结果只描述群聊中呈现的发言风格，不推断敏感属性，不作心理诊断。</p>
-          </div>
-          <div class="ai-save-panel inline-save">
-            <span id="userProfileSaveState" class="hint">保存后新的画像命令会实时使用新配置。</span>
-          </div>
-        </section>
-      </section>
-
-      <section id="moduleAiImage" class="view">
-        <section class="panel ai-config-panel">
-          <div class="panel-head">
-            <div>
-              <h2>AI 生图</h2>
-              <p class="hint">作图命令、尺寸比例、发送策略都可在页面配置。</p>
-            </div>
-          </div>
-          <form id="imageSettingsForm" class="setting-form ai-setting-form">
-            <label><span>作图命令</span><textarea name="command_prefixes" rows="3" placeholder="/draw"></textarea></label>
-            <label><span>尺寸命令</span><textarea name="size_commands" rows="3" placeholder="/draw_size&#10;/size"></textarea></label>
-            <label><span>比例命令</span><textarea name="ratio_commands" rows="3" placeholder="/draw_ratio&#10;/ratio"></textarea></label>
-            <label><span>发送命令</span><textarea name="send_mode_commands" rows="3" placeholder="/send_mode&#10;/draw_send"></textarea></label>
-            <label><span>模型命令</span><textarea name="model_commands" rows="3" placeholder="/draw_model&#10;/image_model"></textarea></label>
-            <label><span>默认尺寸</span><select name="size"><option value="1K">1K</option><option value="2K">2K</option><option value="4K">4K</option></select></label>
-            <label><span>默认比例</span><input name="ratio" type="text" placeholder="1:1 / 16:9 / auto"></label>
-            <label><span>生成质量</span><select name="quality"><option value="standard">standard</option><option value="high">high</option><option value="medium">medium</option><option value="low">low</option></select></label>
-            <label><span>发送模式</span><select name="send_mode"><option value="auto">auto</option><option value="always">always 原图文件</option><option value="never">never 图片预览</option></select></label>
-            <label><span>超时秒数</span><input name="timeout_seconds" type="number" min="5" step="1"></label>
-            <label><span>输出目录</span><input name="output_dir" type="text" placeholder="runtime/data/generated_images"></label>
-            <label><span>设置文件</span><input name="settings_store" type="text" placeholder="runtime/data/image_settings.json"></label>
-          </form>
-          <div class="ai-save-panel inline-save">
-            <button id="saveAiImageConfig" class="primary">保存生图配置</button>
-            <span id="imageSaveState" class="hint">修改只影响新请求，已发出的请求不会被中断。</span>
-          </div>
-        </section>
-      </section>
-
-      <section id="moduleAiDecrypt" class="view">
-        <section class="panel ai-config-panel">
-          <div class="panel-head">
-            <div>
-              <h2>AI 解密</h2>
-              <p class="hint">命中解密游戏模板后读取当前消息图片和文字，调用 AI 解题并自动发送最终答案。</p>
-            </div>
-            <button id="addDecryptTemplate">新增模板</button>
-          </div>
-          <form id="decryptSettingsForm" class="setting-form ai-setting-form">
-            <label><span>超时秒数</span><input name="timeout_seconds" type="number" min="5" step="1"></label>
-            <label><span>最大 Tokens</span><input name="max_tokens" type="number" min="16" max="4096" step="16"></label>
-            <label><span>图片细节</span><select name="image_detail"><option value="low">low</option><option value="high">high</option><option value="auto">auto</option><option value="original">original</option></select></label>
-            <label><span>发送延迟</span><input name="send_delay_ms" type="number" min="0" max="60000" step="100"></label>
-            <label class="wide-field"><span>去重记录文件</span><input name="state_store" type="text" placeholder="runtime/data/ai_decrypt_claimed_ids.json"></label>
-          </form>
-          <div id="decryptTemplates" class="template-list"></div>
-          <div class="ai-save-panel inline-save">
-            <button id="saveAiDecryptConfig" class="primary">保存 AI 解密配置</button>
-            <span id="decryptSaveState" class="hint">保存后新的解密请求会实时使用新配置。</span>
-          </div>
-        </section>
-      </section>
-
-      <section id="moduleGif" class="view">
-        <section class="panel ai-config-panel">
-          <div class="panel-head">
-            <div>
-              <h2>GIF动图</h2>
-              <p class="hint">回复视频/GIF/WebP 后触发，可按自然语言时间段截取：从头到第十秒、从第三秒到最后、十一分三十秒到十一分五十秒。</p>
-            </div>
-          </div>
-          <form id="gifSettingsForm" class="setting-form ai-setting-form">
-            <label><span>触发命令</span><textarea name="command_prefixes" rows="3" placeholder="/vgif&#10;动图&#10;视频动图&#10;转动图"></textarea></label>
-            <label><span>输出目录</span><input name="output_dir" type="text" placeholder="runtime/data/generated_gifs"></label>
-            <label><span>最长截取秒数</span><input name="max_seconds" type="number" min="1" max="120" step="1"></label>
-            <label><span>FPS</span><input name="fps" type="number" min="1" max="30" step="1"></label>
-            <label><span>宽度</span><input name="width" type="text" placeholder="auto / 480 / 720"></label>
-            <label><span>目标最大字节</span><input name="max_bytes" type="number" min="0" step="1024"></label>
-          </form>
-          <div class="gif-help">
-            <span class="tag">例：动图 从头开始到第十秒</span>
-            <span class="tag">例：动图 从第三秒到最后</span>
-            <span class="tag">例：动图 从11分30秒到11分50秒</span>
-            <span class="tag">例：/vgif 11:30-11:50</span>
-          </div>
-          <div class="ai-save-panel inline-save">
-            <button id="saveGifConfig" class="primary">保存 GIF 配置</button>
-            <span id="gifSaveState" class="hint">保存后新的 GIF 截取请求会实时使用新配置。</span>
-          </div>
-        </section>
-      </section>
-
-      <section id="moduleWordCloud" class="view">
-        <section class="panel ai-config-panel">
-          <div class="panel-head">
-            <div>
-              <h2>词云</h2>
-              <p class="hint">按指令统计当前群最近消息，每个群独立生成热词云图片。</p>
-            </div>
-            <button id="saveWordCloudConfig" class="primary">保存词云配置</button>
-          </div>
-          <div class="red-packet-summary">
-            <span id="wordCloudModuleState" class="tag">模块状态</span>
-            <span class="tag">当前群统计</span>
-            <span class="tag">Pillow 图片生成</span>
-          </div>
-          <form id="wordCloudSettingsForm" class="setting-form ai-setting-form">
-            <label><span>触发命令</span><textarea name="command_prefixes" rows="3" placeholder="cy&#10;/cy"></textarea></label>
-            <label><span>默认统计条数</span><input name="default_limit" type="number" min="10" max="10000" step="50"></label>
-            <label><span>最小统计条数</span><input name="min_limit" type="number" min="10" max="10000" step="10"></label>
-            <label><span>最大统计条数</span><input name="max_limit" type="number" min="50" max="10000" step="50"></label>
-            <label><span>图片宽度</span><input name="width" type="number" min="480" max="2400" step="10"></label>
-            <label><span>图片高度</span><input name="height" type="number" min="360" max="1800" step="10"></label>
-            <label><span>输出目录</span><input name="output_dir" type="text" placeholder="runtime/data/generated_word_clouds"></label>
-            <label><span>忽略命令前缀</span><textarea name="ignore_command_prefixes" rows="3" placeholder="/&#10;.&#10;,"></textarea></label>
-            <label class="wide-field"><span>额外停用词</span><textarea name="stop_words" rows="4" placeholder="每行一个词"></textarea></label>
-            <label class="inline-setting"><span>触发后删除命令</span><input name="delete_command" type="checkbox"></label>
-          </form>
-          <div class="gif-help">
-            <span class="tag">例：cy</span>
-            <span class="tag">例：cy 500</span>
-            <span class="tag">例：/cy 2000</span>
-          </div>
-          <div class="ai-save-panel inline-save">
-            <span id="wordCloudSaveState" class="hint">保存后新的词云命令会实时使用新配置。</span>
-          </div>
-        </section>
-      </section>
-
-      <section id="moduleCheckin" class="view">
-        <section class="panel ai-config-panel">
-          <div class="panel-head">
-            <div>
-              <h2>自动签到</h2>
-              <p class="hint">选择群组或 Bot，使用标准 5 段 Cron（分 时 日 月 周）安排发送；输入时会实时解释当前通知方式。</p>
+        <!-- ==================== MODULE: SEND RED PACKET ==================== -->
+        <section id="moduleSendRedPacket" class="view" data-module-view="send_red_packet" data-save-btn="saveSendRedPacketConfig">
+          <div class="module-banner">
+            <div class="module-banner-meta">
+              <label class="switch module-inline-switch" title="启用或禁用发红包模块">
+                <input type="checkbox" data-module-toggle="send_red_packet" aria-label="发红包总开关" />
+                <span></span>
+              </label>
+              <div class="banner-tags">
+                <span id="sendRedPacketModuleState" class="tag">模块状态</span>
+                <span id="sendRedPacketSaveState" class="hint">保存后新的发红包请求会实时使用新配置。</span>
+              </div>
             </div>
             <div class="module-actions">
-              <button id="loadCheckinTargets">加载目标</button>
-              <button id="addCheckinTask">新增签到</button>
-              <button id="saveCheckinConfig" class="primary">保存签到配置</button>
+              <button id="addSendRedPacketTemplate" type="button">新增模板</button>
+              <button id="saveSendRedPacketConfig" class="primary" type="button">保存发红包配置</button>
             </div>
           </div>
-          <div class="red-packet-summary">
-            <span id="checkinModuleState" class="tag">模块状态</span>
-            <span id="checkinTaskCount" class="tag">签到 0 个</span>
-            <span id="checkinTargetState" class="hint">可手填 chat_id、@username，或加载目标后选择。</span>
-          </div>
-          <div class="cron-guide hint">
-            <strong>Cron 提示</strong>
-            <span><code>*/30 * * * *</code> 表示每隔 30 分钟；<code>0 9 * * 1</code> 表示每周一 09:00。日期步长（如 <code>*/3</code>）按每月日期重新计算。</span>
-          </div>
-          <div id="checkinTasks" class="template-list"></div>
-          <div class="ai-save-panel inline-save">
-            <span id="checkinSaveState" class="hint">保存后自动签到调度会实时使用新配置。</span>
+
+          <div class="workspace-layout">
+            <div class="workspace-main">
+              <section class="section-card">
+                <div class="section-head">
+                  <div>
+                    <h3>风控与基础参数</h3>
+                    <p class="hint">控制同时在线红包数量、单包金额下限与持久化状态文件路径。</p>
+                  </div>
+                </div>
+                <form id="sendRedPacketSettingsForm" class="setting-form form-grid">
+                  <label class="field"><span>红包 ID 长度</span><input name="id_length" type="number" min="4" max="12" step="1" /></label>
+                  <label class="field"><span>最大同时红包</span><input name="max_active_packets" type="number" min="1" max="200" step="1" /></label>
+                  <label class="field"><span>普通群单包下限</span><input name="min_packet_amount" type="number" min="2" max="1000000" step="1" /></label>
+                  <label class="field"><span>严格群单包下限</span><input name="strict_min_packet_amount" type="number" min="2" max="1000000" step="1" /></label>
+                  <label class="field wide-field"><span>严格下限群 ID</span><textarea name="strict_min_packet_group_ids" rows="3" class="mono-input" placeholder="-1000000000001"></textarea></label>
+                  <label class="field wide-field"><span>状态文件</span><input name="state_store" type="text" class="mono-input" placeholder="runtime/data/send_red_packet_state.json" /></label>
+                </form>
+              </section>
+
+              <section class="section-card">
+                <div class="section-head">
+                  <div>
+                    <h3>红包玩法模板</h3>
+                    <p class="hint">管理拼手气口令红包或算术题等不同发包玩法模板。</p>
+                  </div>
+                </div>
+                <div id="sendRedPacketTemplates" class="template-list"></div>
+              </section>
+            </div>
+
+            <aside class="workspace-aside">
+              <section class="aside-card">
+                <h4>指令示例</h4>
+                <p class="hint">点击示例可直接复制指令到剪贴板。</p>
+                <div class="gif-help command-chips">
+                  <span class="tag copy-cmd" data-copy="红包 10000 10 哈哈哈">例：红包 10000 10 哈哈哈</span>
+                  <span class="tag copy-cmd" data-copy="/红包 10000 10 /start">例：/红包 10000 10 /start</span>
+                  <span class="tag">自己发的红包不会被自动抢红包领取</span>
+                </div>
+              </section>
+            </aside>
           </div>
         </section>
-      </section>
 
-      <section id="moduleAutoForward" class="view">
-        <section class="panel ai-config-panel">
-          <div class="panel-head">
-            <div>
-              <h2>自动转发</h2>
-              <p class="hint">回复某条消息发送命令后，按不同模式把被回复的消息回传到当前聊天。</p>
+        <!-- ==================== MODULE: AI REPLY ==================== -->
+        <section id="moduleAiReply" class="view" data-module-view="ai_reply" data-save-btn="saveAiReplyConfig">
+          <div class="module-banner">
+            <div class="module-banner-meta">
+              <label class="switch module-inline-switch" title="启用或禁用 AI 自动回复">
+                <input type="checkbox" data-module-toggle="ai_reply" aria-label="AI 自动回复总开关" />
+                <span></span>
+              </label>
+              <div class="banner-tags">
+                <span id="aiReplyModuleState" class="tag">模块状态</span>
+                <span id="aiSaveState" class="hint">修改只影响新请求，已发出的请求不会被中断。</span>
+              </div>
             </div>
-            <button id="saveAutoForwardConfig" class="primary">保存自动转发配置</button>
+            <div class="module-actions">
+              <button type="button" class="ghost-btn" data-jump-view="aiServices">AI 服务连接</button>
+              <button id="saveAiReplyConfig" class="primary" type="button">保存自动回复配置</button>
+            </div>
           </div>
-          <div class="red-packet-summary">
-            <span id="autoForwardModuleState" class="tag">模块状态</span>
-            <span class="tag">仅响应自己发出的命令</span>
-            <span class="tag">四种转发模式</span>
-          </div>
-          <form id="autoForwardSettingsForm" class="setting-form ai-setting-form">
-            <label><span>原生转发命令</span><textarea name="command_prefixes" rows="2" placeholder=",re"></textarea></label>
-            <label><span>复制文本命令</span><textarea name="copy_text_command_prefixes" rows="2" placeholder=",copy"></textarea></label>
-            <label><span>引用包装命令</span><textarea name="quote_command_prefixes" rows="2" placeholder=",quote"></textarea></label>
-            <label><span>仅发链接命令</span><textarea name="link_command_prefixes" rows="2" placeholder=",link"></textarea></label>
-            <label class="inline-setting"><span>转发成功后删除命令</span><input name="delete_command" type="checkbox"></label>
+
+          <form id="replySettingsForm" class="workspace-layout">
+            <div class="workspace-main">
+              <section class="section-card">
+                <div class="section-head">
+                  <div>
+                    <h3>人设与触发词</h3>
+                    <p class="hint">设定系统提示词及群聊中的命令、唤醒词与回复触发条件。</p>
+                  </div>
+                </div>
+                <div class="setting-form form-grid">
+                  <label class="field wide-field"><span>系统提示词</span><textarea name="system_prompt" rows="4" placeholder="定义 AI 的角色与回复风格..."></textarea></label>
+                  <label class="field"><span>命令前缀</span><textarea name="command_prefixes" rows="3" class="mono-input" placeholder="/ai&#10;.ai"></textarea></label>
+                  <label class="field"><span>唤醒词</span><textarea name="wake_words" rows="3" placeholder="@ai&#10;喂AI&#10;问AI"></textarea></label>
+                  <label class="field"><span>回复触发词</span><textarea name="reply_triggers" rows="3" placeholder="ai&#10;回答&#10;解释"></textarea></label>
+                  <label class="field"><span>/msg 命令</span><textarea name="message_info_command_prefixes" rows="3" class="mono-input" placeholder="/msg"></textarea></label>
+                </div>
+              </section>
+
+              <section class="section-card">
+                <div class="section-head">
+                  <div>
+                    <h3>推理与生成参数</h3>
+                    <p class="hint">控制上下文窗口、思考深度、文本详略和图像解析精度。</p>
+                  </div>
+                </div>
+                <div class="setting-form form-grid cols-3">
+                  <label class="field"><span>上下文条数</span><input name="context_limit" type="number" min="0" step="1" /></label>
+                  <label class="field"><span>超时秒数</span><input name="timeout_seconds" type="number" min="5" step="1" /></label>
+                  <label class="field"><span>最大 Tokens</span><input name="max_tokens" type="number" min="256" step="256" /></label>
+                  <label class="field"><span>Temperature</span><input name="temperature" type="number" min="0" max="2" step="0.1" /></label>
+                  <label class="field"><span>Reasoning</span><select name="reasoning_effort"><option value="none">none</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option></select></label>
+                  <label class="field"><span>文本详略</span><select name="text_verbosity"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label>
+                  <label class="field"><span>图片细节</span><select name="image_detail"><option value="low">low</option><option value="high">high</option><option value="auto">auto</option><option value="original">original</option></select></label>
+                  <label class="field span-2"><span>设置文件</span><input name="settings_store" type="text" class="mono-input" placeholder="runtime/data/ai_settings.json" /></label>
+                </div>
+              </section>
+            </div>
+
+            <aside class="workspace-aside">
+              <section class="aside-card">
+                <h4>能力开关</h4>
+                <div class="toggle-stack">
+                  <label class="inline-setting toggle-row">
+                    <div><span>联网搜索</span><small>允许模型检索实时网页信息</small></div>
+                    <input name="web_search" type="checkbox" />
+                  </label>
+                  <label class="inline-setting toggle-row">
+                    <div><span>思考摘要</span><small>在回复中附带推理过程摘要</small></div>
+                    <input name="reasoning_summary" type="checkbox" />
+                  </label>
+                  <label class="inline-setting toggle-row">
+                    <div><span>/msg 信息查看</span><small>回复消息快速查看原始元信息</small></div>
+                    <input name="message_info_enabled" type="checkbox" />
+                  </label>
+                </div>
+              </section>
+
+              <section class="aside-card">
+                <h4>提示</h4>
+                <p class="hint">触发词、上下文、模型参数在此分别配置；连接地址与 API Key 统一在「AI 服务 → 服务配置」中维护，保存后新请求实时生效。</p>
+              </section>
+            </aside>
           </form>
-          <div class="gif-help">
-            <span class="tag">,re：原生转发，携带原作者</span>
-            <span class="tag">,copy：只复制文本，不显示原作者</span>
-            <span class="tag">,quote：带“来自 X”前缀引用包装</span>
-            <span class="tag">,link：公开群消息链接</span>
+        </section>
+
+        <!-- ==================== MODULE: USER PROFILE ==================== -->
+        <section id="moduleUserProfile" class="view" data-module-view="user_profile" data-save-btn="saveUserProfileConfig">
+          <div class="module-banner">
+            <div class="module-banner-meta">
+              <label class="switch module-inline-switch" title="启用或禁用群友画像">
+                <input type="checkbox" data-module-toggle="user_profile" aria-label="群友画像总开关" />
+                <span></span>
+              </label>
+              <div class="banner-tags red-packet-summary">
+                <span id="userProfileModuleState" class="tag">模块状态</span>
+                <span class="tag">默认 40 条样本</span>
+                <span class="tag">结构化 JSON</span>
+                <span class="tag">Telegram HTML</span>
+              </div>
+            </div>
+            <div class="module-actions">
+              <button id="saveUserProfileConfig" class="primary" type="button">保存画像配置</button>
+            </div>
           </div>
-          <div class="ai-save-panel inline-save">
-            <span id="autoForwardSaveState" class="hint">保存后新的转发命令会实时使用新配置。</span>
+
+          <div class="profile-process" aria-label="用户画像生成流程">
+            <div class="step-card"><span class="step-num">01</span><div><strong>定位群友</strong><small>回复消息或 @username</small></div></div>
+            <div class="step-card"><span class="step-num">02</span><div><strong>抽取样本</strong><small>近期样本或数据库全量文字</small></div></div>
+            <div class="step-card"><span class="step-num">03</span><div><strong>AI 归纳</strong><small>复用回复服务模型</small></div></div>
+            <div class="step-card"><span class="step-num">04</span><div><strong>富文本输出</strong><small>可展开详情与原消息链接</small></div></div>
+          </div>
+
+          <div class="workspace-layout">
+            <div class="workspace-main">
+              <form id="userProfileSettingsForm" class="section-stack">
+                <section class="section-card">
+                  <div class="section-head">
+                    <div>
+                      <h3>抽样与模型预算</h3>
+                      <p class="hint">设定触发指令、消息样本上下限及 AI 单次生成的耗时与长度上限。</p>
+                    </div>
+                  </div>
+                  <div class="setting-form form-grid cols-3">
+                    <label class="field span-all"><span>触发命令</span><textarea name="command_prefixes" rows="3" class="mono-input" placeholder="/profile&#10;/fx&#10;.fx&#10;画像&#10;用户画像"></textarea></label>
+                    <label class="field"><span>默认样本数</span><input name="default_sample_size" type="number" min="3" max="2000" step="1" /></label>
+                    <label class="field"><span>命令可用最小样本数</span><input name="min_sample_size" type="number" min="3" max="2000" step="1" /></label>
+                    <label class="field"><span>命令可用最大样本数</span><input name="max_sample_size" type="number" min="10" max="2000" step="1" /></label>
+                    <label class="field"><span>生成所需最少样本</span><input name="min_required_samples" type="number" min="3" max="2000" step="1" /></label>
+                    <label class="field"><span>AI 超时秒数</span><input name="timeout_seconds" type="number" min="5" max="600" step="1" /></label>
+                    <label class="field"><span>最大输出 Tokens</span><input name="max_tokens" type="number" min="512" max="12000" step="128" /></label>
+                  </div>
+                </section>
+
+                <section class="section-card">
+                  <div class="section-head">
+                    <div>
+                      <h3>画像写作风格与进度反馈</h3>
+                      <p class="hint">调整口吻风格，同时确保输出遵守安全与事实边界。</p>
+                    </div>
+                  </div>
+                  <div class="setting-form form-grid">
+                    <label class="field wide-field">
+                      <span>画像写作风格</span>
+                      <textarea name="style_prompt" rows="4" placeholder="毒舌、有梗、敢吐槽，允许适度夸张……"></textarea>
+                      <small class="hint">可以像群友互损一样起外号、玩反差，但敏感属性、恶意羞辱、外貌攻击、诊断性标签和伪造引用始终被禁止。</small>
+                    </label>
+                    <div class="wide-field info-callout">
+                      <strong>消息进度</strong>
+                      <small class="hint">命令会原地改为“分析中”，随后继续更新为画像结果；编辑失败时自动补发结果。</small>
+                    </div>
+                  </div>
+                </section>
+              </form>
+              <div class="ai-save-panel inline-save">
+                <span id="userProfileSaveState" class="hint">保存后新的画像命令会实时使用新配置。</span>
+              </div>
+            </div>
+
+            <aside class="workspace-aside">
+              <section class="aside-card">
+                <h4>常用命令</h4>
+                <div class="gif-help command-chips">
+                  <span class="tag copy-cmd" data-copy="/profile">回复某人：/profile</span>
+                  <span class="tag copy-cmd" data-copy="/profile 80">回复某人：/profile 80</span>
+                  <span class="tag copy-cmd" data-copy="/profile @username 60">指定用户：/profile @username 60</span>
+                  <span class="tag copy-cmd" data-copy="/fx all">跨群全部：/fx all</span>
+                  <span class="tag copy-cmd" data-copy="/fx local">本群全部：/fx local</span>
+                </div>
+              </section>
+              <section class="aside-card profile-privacy-note">
+                <strong>样本边界</strong>
+                <p>群聊文字会保存在本地 SQLite 供分析使用，但画像结论和派生标签不会持久化，不在本地建立持久用户档案。结果只描述群聊中呈现的发言风格，不推断敏感属性，不作心理诊断。</p>
+              </section>
+            </aside>
           </div>
         </section>
-      </section>
 
-      <section id="moduleMagnetImport" class="view">
-        <section class="panel ai-config-panel">
-          <div class="panel-head">
-            <div>
-              <h2>磁力数据导入</h2>
-              <p class="hint">监听指定群里指定用户发送的 CSV 数据文件，分块下载后导入 MagnetBoard「数据交换中心」，成功后回复原消息并删除临时文件。</p>
+        <!-- ==================== MODULE: AI IMAGE ==================== -->
+        <section id="moduleAiImage" class="view" data-module-view="ai_image" data-save-btn="saveAiImageConfig">
+          <div class="module-banner">
+            <div class="module-banner-meta">
+              <label class="switch module-inline-switch" title="启用或禁用 AI 生图">
+                <input type="checkbox" data-module-toggle="ai_image" aria-label="AI 生图总开关" />
+                <span></span>
+              </label>
+              <div class="banner-tags">
+                <span id="aiImageModuleState" class="tag">模块状态</span>
+                <span id="imageSaveState" class="hint">修改只影响新请求，已发出的请求不会被中断。</span>
+              </div>
             </div>
-            <button id="saveMagnetImportConfig" class="primary">保存磁力数据导入配置</button>
+            <div class="module-actions">
+              <button type="button" class="ghost-btn" data-jump-view="aiServices">生图服务连接</button>
+              <button id="saveAiImageConfig" class="primary" type="button">保存生图配置</button>
+            </div>
           </div>
-          <div class="red-packet-summary">
-            <span id="magnetImportModuleState" class="tag">模块状态</span>
-            <span id="magnetImportPasswordState" class="tag">密码状态</span>
-            <span id="magnetImportCount" class="tag">累计导入 0 次</span>
-          </div>
-          <p id="magnetImportLast" class="hint">暂无导入记录</p>
-          <form id="magnetImportSettingsForm" class="setting-form ai-setting-form">
-            <label><span>监听群 ID（每行一个）</span><textarea name="watch_chats" rows="2" placeholder="-1000000000002"></textarea></label>
-            <label><span>发送者用户名（每行一个，不带 @）</span><textarea name="sender_usernames" rows="2" placeholder="example_sender"></textarea></label>
-            <label><span>发送者用户 ID（可选，每行一个）</span><textarea name="sender_ids" rows="2"></textarea></label>
-            <label><span>文件名正则</span><input name="file_name_pattern" type="text" placeholder="^x1080x.*\.csv$"></label>
-            <label><span>文件大小上限（MB）</span><input name="max_file_size_mb" type="number" min="1" max="4096" step="1"></label>
-            <label><span>下载重试次数</span><input name="download_retries" type="number" min="1" max="20" step="1"></label>
-            <label class="wide-field"><span>MagnetBoard 地址</span><input name="api_base_url" type="text" placeholder="http://127.0.0.1:8022"></label>
-            <label><span>MagnetBoard 用户名</span><input name="api_username" type="text" autocomplete="off" placeholder="admin"></label>
-            <label class="secret-field"><span>MagnetBoard 密码</span><span class="secret-input"><input name="api_password" type="password" autocomplete="new-password" data-secret-input placeholder="留空则不修改"><button type="button" class="secret-toggle" data-secret-toggle aria-pressed="false">显示</button></span></label>
-            <label><span>导入超时（秒）</span><input name="import_timeout_seconds" type="number" min="30" max="7200" step="30"></label>
-            <label class="inline-setting"><span>更新已存在的记录</span><input name="update_existing" type="checkbox"></label>
-            <label class="inline-setting"><span>跳过重复记录</span><input name="skip_duplicates" type="checkbox"></label>
-            <label class="wide-field"><span>导入成功后回复</span><input name="reply_text" type="text" placeholder="已自动导入，谢谢老大"></label>
+
+          <form id="imageSettingsForm" class="workspace-layout">
+            <div class="workspace-main">
+              <section class="section-card">
+                <div class="section-head">
+                  <div>
+                    <h3>默认画质与发送策略</h3>
+                    <p class="hint">配置图片默认分辨率、画面比例、生成质量与文件发送方式。</p>
+                  </div>
+                </div>
+                <div class="setting-form form-grid cols-3">
+                  <label class="field"><span>默认尺寸</span><select name="size"><option value="1K">1K</option><option value="2K">2K</option><option value="4K">4K</option></select></label>
+                  <label class="field"><span>默认比例</span><input name="ratio" type="text" class="mono-input" placeholder="1:1 / 16:9 / auto" /></label>
+                  <label class="field"><span>生成质量</span><select name="quality"><option value="standard">standard</option><option value="high">high</option><option value="medium">medium</option><option value="low">low</option></select></label>
+                  <label class="field"><span>发送模式</span><select name="send_mode"><option value="auto">auto</option><option value="always">always 原图文件</option><option value="never">never 图片预览</option></select></label>
+                  <label class="field"><span>超时秒数</span><input name="timeout_seconds" type="number" min="5" step="1" /></label>
+                  <label class="field"><span>输出目录</span><input name="output_dir" type="text" class="mono-input" placeholder="runtime/data/generated_images" /></label>
+                  <label class="field span-all"><span>设置文件</span><input name="settings_store" type="text" class="mono-input" placeholder="runtime/data/image_settings.json" /></label>
+                </div>
+              </section>
+
+              <section class="section-card">
+                <div class="section-head">
+                  <div>
+                    <h3>群聊触发命令</h3>
+                    <p class="hint">每行一条指令前缀，支持群内实时切换尺寸、比例、发送方式与模型。</p>
+                  </div>
+                </div>
+                <div class="setting-form form-grid cols-3">
+                  <label class="field"><span>作图命令</span><textarea name="command_prefixes" rows="3" class="mono-input" placeholder="/draw"></textarea></label>
+                  <label class="field"><span>尺寸命令</span><textarea name="size_commands" rows="3" class="mono-input" placeholder="/draw_size&#10;/size"></textarea></label>
+                  <label class="field"><span>比例命令</span><textarea name="ratio_commands" rows="3" class="mono-input" placeholder="/draw_ratio&#10;/ratio"></textarea></label>
+                  <label class="field"><span>发送命令</span><textarea name="send_mode_commands" rows="3" class="mono-input" placeholder="/send_mode&#10;/draw_send"></textarea></label>
+                  <label class="field"><span>模型命令</span><textarea name="model_commands" rows="3" class="mono-input" placeholder="/draw_model&#10;/image_model"></textarea></label>
+                </div>
+              </section>
+            </div>
+
+            <aside class="workspace-aside">
+              <section class="aside-card">
+                <h4>使用说明</h4>
+                <p class="hint">支持纯文本生图、带图参考生图以及回复图片二创；生图提供商与模型可在「AI 服务 → 服务配置」中切换。</p>
+              </section>
+            </aside>
           </form>
-          <div class="gif-help">
-            <span class="tag">断点续传下载</span>
-            <span class="tag">同一消息只导入一次</span>
-            <span class="tag">完成后自动删除文件</span>
+        </section>
+
+        <!-- ==================== MODULE: AI DECRYPT ==================== -->
+        <section id="moduleAiDecrypt" class="view" data-module-view="ai_decrypt" data-save-btn="saveAiDecryptConfig">
+          <div class="module-banner">
+            <div class="module-banner-meta">
+              <label class="switch module-inline-switch" title="启用或禁用 AI 解密">
+                <input type="checkbox" data-module-toggle="ai_decrypt" aria-label="AI 解密总开关" />
+                <span></span>
+              </label>
+              <div class="banner-tags">
+                <span id="aiDecryptModuleState" class="tag">模块状态</span>
+                <span id="decryptSaveState" class="hint">保存后新的解密请求会实时使用新配置。</span>
+              </div>
+            </div>
+            <div class="module-actions">
+              <button id="addDecryptTemplate" type="button">新增模板</button>
+              <button id="saveAiDecryptConfig" class="primary" type="button">保存 AI 解密配置</button>
+            </div>
           </div>
-          <div class="ai-save-panel inline-save">
-            <span id="magnetImportSaveState" class="hint">保存后新收到的文件会使用新配置。</span>
+
+          <div class="workspace-layout">
+            <div class="workspace-main">
+              <section class="section-card">
+                <div class="section-head">
+                  <div>
+                    <h3>解题推理与去重设置</h3>
+                    <p class="hint">命中解密游戏模板后读取当前消息图片和文字，调用 AI 解题并自动发送最终答案。</p>
+                  </div>
+                </div>
+                <form id="decryptSettingsForm" class="setting-form form-grid">
+                  <label class="field"><span>超时秒数</span><input name="timeout_seconds" type="number" min="5" step="1" /></label>
+                  <label class="field"><span>最大 Tokens</span><input name="max_tokens" type="number" min="16" max="4096" step="16" /></label>
+                  <label class="field"><span>图片细节</span><select name="image_detail"><option value="low">low</option><option value="high">high</option><option value="auto">auto</option><option value="original">original</option></select></label>
+                  <label class="field"><span>发送延迟 (ms)</span><input name="send_delay_ms" type="number" min="0" max="60000" step="100" /></label>
+                  <label class="field wide-field"><span>去重记录文件</span><input name="state_store" type="text" class="mono-input" placeholder="runtime/data/ai_decrypt_claimed_ids.json" /></label>
+                </form>
+              </section>
+
+              <section class="section-card">
+                <div class="section-head">
+                  <div>
+                    <h3>解密规则模板</h3>
+                    <p class="hint">所有触发关键词需全部命中才会触发对应解题流程。</p>
+                  </div>
+                </div>
+                <div id="decryptTemplates" class="template-list"></div>
+              </section>
+            </div>
+
+            <aside class="workspace-aside">
+              <section class="aside-card">
+                <h4>工作机制</h4>
+                <p class="hint">系统会结合 ID 标记对同一题目去重，防止重复作答；当模板要求图片时仅对包含媒体的消息调用视觉模型。</p>
+              </section>
+            </aside>
           </div>
         </section>
-      </section>
 
-      <section id="moduleQuote" class="view">
-        <section class="panel ai-config-panel">
-          <div class="panel-head">
-            <div>
-              <h2>语录贴纸</h2>
-              <p class="hint">回复消息用 /q 或 语录 生成语录贴纸；渲染由第三方 quote-api 完成（消息文本与发送者头像会发送给该服务）。</p>
+        <!-- ==================== MODULE: GIF ==================== -->
+        <section id="moduleGif" class="view" data-module-view="gif" data-save-btn="saveGifConfig">
+          <div class="module-banner">
+            <div class="module-banner-meta">
+              <label class="switch module-inline-switch" title="启用或禁用 GIF 动图">
+                <input type="checkbox" data-module-toggle="gif" aria-label="GIF 动图总开关" />
+                <span></span>
+              </label>
+              <div class="banner-tags">
+                <span id="gifModuleState" class="tag">模块状态</span>
+                <span id="gifSaveState" class="hint">保存后新的 GIF 截取请求会实时使用新配置。</span>
+              </div>
             </div>
-            <button id="saveQuoteConfig" class="primary">保存语录配置</button>
+            <div class="module-actions">
+              <button id="saveGifConfig" class="primary" type="button">保存 GIF 配置</button>
+            </div>
           </div>
-          <div class="red-packet-summary">
-            <span id="quoteModuleState" class="tag">模块状态</span>
-            <span class="tag">/q s 存贴纸包</span>
-            <span class="tag">TGS 媒体需 rlottie-python</span>
-          </div>
-          <form id="quoteSettingsForm" class="setting-form ai-setting-form">
-            <label><span>触发命令</span><textarea name="command_prefixes" rows="3" placeholder="/q&#10;语录"></textarea></label>
-            <label class="wide-field"><span>quote-api 地址</span><input name="api_url" type="text" placeholder="https://quote-api-enhanced.zhetengsha.eu.org/generate.webp"></label>
-            <label><span>贴纸包短名</span><input name="sticker_set_short_name" type="text" placeholder="留空则不启用 /q s"></label>
-            <label><span>背景色</span><input name="background_color" type="text" placeholder="#1b1429"></label>
-            <label><span>最多合成条数</span><input name="max_messages" type="number" min="1" max="10" step="1"></label>
-            <label><span>画布宽度</span><input name="width" type="number" min="256" max="2048" step="1"></label>
-            <label><span>画布高度</span><input name="height" type="number" min="256" max="4096" step="1"></label>
-            <label><span>缩放</span><input name="scale" type="number" min="1" max="4" step="1"></label>
-            <label><span>Emoji 风格</span><input name="emoji_brand" type="text" placeholder="apple"></label>
-            <label><span>超时秒数</span><input name="timeout_seconds" type="number" min="5" max="300" step="1"></label>
-            <label class="wide-field"><span>临时目录</span><input name="tmp_dir" type="text" placeholder="runtime/tmp"></label>
-          </form>
-          <div class="gif-help">
-            <span class="tag">例：语录</span>
-            <span class="tag">例：/q 3</span>
-            <span class="tag">例：/q r</span>
-            <span class="tag">例：/q f 自定义文字</span>
-            <span class="tag">例：/q config sticker mypack</span>
-          </div>
-          <div class="ai-save-panel inline-save">
-            <span id="quoteSaveState" class="hint">保存后新的语录命令会实时使用新配置。</span>
+
+          <div class="workspace-layout">
+            <div class="workspace-main">
+              <section class="section-card">
+                <div class="section-head">
+                  <div>
+                    <h3>截取与转码参数</h3>
+                    <p class="hint">回复视频/GIF/WebP 后触发，支持自然语言时间段截取与体积限制。</p>
+                  </div>
+                </div>
+                <form id="gifSettingsForm" class="setting-form form-grid cols-3">
+                  <label class="field span-all"><span>触发命令</span><textarea name="command_prefixes" rows="3" class="mono-input" placeholder="/vgif&#10;动图&#10;视频动图&#10;转动图"></textarea></label>
+                  <label class="field"><span>最长截取秒数</span><input name="max_seconds" type="number" min="1" max="120" step="1" /></label>
+                  <label class="field"><span>FPS</span><input name="fps" type="number" min="1" max="30" step="1" /></label>
+                  <label class="field"><span>宽度</span><input name="width" type="text" class="mono-input" placeholder="auto / 480 / 720" /></label>
+                  <label class="field"><span>目标最大字节</span><input name="max_bytes" type="number" min="0" step="1024" /></label>
+                  <label class="field span-2"><span>输出目录</span><input name="output_dir" type="text" class="mono-input" placeholder="runtime/data/generated_gifs" /></label>
+                </form>
+              </section>
+            </div>
+
+            <aside class="workspace-aside">
+              <section class="aside-card">
+                <h4>时间表达示例</h4>
+                <div class="gif-help command-chips">
+                  <span class="tag copy-cmd" data-copy="动图 从头开始到第十秒">例：动图 从头开始到第十秒</span>
+                  <span class="tag copy-cmd" data-copy="动图 从第三秒到最后">例：动图 从第三秒到最后</span>
+                  <span class="tag copy-cmd" data-copy="动图 从11分30秒到11分50秒">例：动图 从11分30秒到11分50秒</span>
+                  <span class="tag copy-cmd" data-copy="/vgif 11:30-11:50">例：/vgif 11:30-11:50</span>
+                </div>
+              </section>
+            </aside>
           </div>
         </section>
-      </section>
 
-      <section id="moduleChatGames" class="view">
-        <section class="panel ai-config-panel">
-          <div class="panel-head">
-            <div>
-              <h2>聊天小游戏</h2>
-              <p class="hint">管理今日幸运词、Emoji 图谜和乱码解码。中奖时直接回复命中消息，把加分交给群里的积分机器人。</p>
+        <!-- ==================== MODULE: WORD CLOUD ==================== -->
+        <section id="moduleWordCloud" class="view" data-module-view="word_cloud" data-save-btn="saveWordCloudConfig">
+          <div class="module-banner">
+            <div class="module-banner-meta">
+              <label class="switch module-inline-switch" title="启用或禁用词云">
+                <input type="checkbox" data-module-toggle="word_cloud" aria-label="词云总开关" />
+                <span></span>
+              </label>
+              <div class="banner-tags red-packet-summary">
+                <span id="wordCloudModuleState" class="tag">模块状态</span>
+                <span class="tag">当前群统计</span>
+                <span class="tag">Pillow 图片生成</span>
+              </div>
             </div>
-            <button id="saveChatGamesConfig" class="primary">保存小游戏配置</button>
+            <div class="module-actions">
+              <button id="saveWordCloudConfig" class="primary" type="button">保存词云配置</button>
+            </div>
           </div>
-          <div class="red-packet-summary">
-            <span id="chatGamesModuleState" class="tag">模块状态</span>
-            <span class="tag">今日幸运词</span>
-            <span class="tag">Emoji 图谜</span>
-            <span class="tag">乱码解码</span>
-          </div>
-          <form id="chatGamesSettingsForm" class="setting-form ai-setting-form">
-            <label class="wide-field"><span>状态文件</span><input name="state_store" type="text" placeholder="runtime/data/chat_games_state.json"></label>
-            <label class="wide-field"><span>图片输出目录</span><input name="output_dir" type="text" placeholder="runtime/data/generated_chat_games"></label>
 
-            <p class="wide-field hint">—— 今日幸运词 ——</p>
-            <label class="inline-setting"><span>启用幸运词</span><input name="lucky_enabled" type="checkbox"></label>
-            <label><span>奖励文本</span><input name="lucky_reward_text" type="text" placeholder="+100"></label>
-            <label><span>每群每日次数</span><input name="lucky_daily_limit_per_chat" type="number" min="0" max="50" step="1"></label>
-            <label><span>每人每日次数</span><input name="lucky_per_user_daily_limit" type="number" min="0" max="20" step="1"></label>
-            <label><span>最短消息长度</span><input name="lucky_min_message_length" type="number" min="1" max="80" step="1"></label>
-            <label><span>忽略前缀</span><textarea name="lucky_ignore_command_prefixes" rows="3" placeholder="/&#10;.&#10;,&#10;+"></textarea></label>
-            <label class="wide-field"><span>幸运词</span><textarea name="lucky_words" rows="5" placeholder="咖啡&#10;服务器&#10;重启"></textarea></label>
+          <div class="workspace-layout">
+            <div class="workspace-main">
+              <form id="wordCloudSettingsForm" class="section-stack">
+                <section class="section-card">
+                  <div class="section-head">
+                    <div>
+                      <h3>统计范围与画布尺寸</h3>
+                      <p class="hint">按指令统计当前群最近消息，每个群独立生成热词云图片。</p>
+                    </div>
+                  </div>
+                  <div class="setting-form form-grid cols-3">
+                    <label class="field"><span>默认统计条数</span><input name="default_limit" type="number" min="10" max="10000" step="50" /></label>
+                    <label class="field"><span>最小统计条数</span><input name="min_limit" type="number" min="10" max="10000" step="10" /></label>
+                    <label class="field"><span>最大统计条数</span><input name="max_limit" type="number" min="50" max="10000" step="50" /></label>
+                    <label class="field"><span>图片宽度 (px)</span><input name="width" type="number" min="480" max="2400" step="10" /></label>
+                    <label class="field"><span>图片高度 (px)</span><input name="height" type="number" min="360" max="1800" step="10" /></label>
+                    <label class="field"><span>输出目录</span><input name="output_dir" type="text" class="mono-input" placeholder="runtime/data/generated_word_clouds" /></label>
+                  </div>
+                </section>
 
-            <p class="wide-field hint">—— Emoji 图谜 ——</p>
-            <label class="inline-setting"><span>启用图谜</span><input name="emoji_enabled" type="checkbox"></label>
-            <label><span>触发命令</span><textarea name="emoji_command_prefixes" rows="3" placeholder="/emoji&#10;/emojiriddle&#10;图谜"></textarea></label>
-            <label><span>答题秒数</span><input name="emoji_duration_seconds" type="number" min="5" max="300" step="1"></label>
-            <label><span>奖励文本</span><input name="emoji_reward_text" type="text" placeholder="+100"></label>
-            <label><span>赢家策略</span><select name="emoji_winner_policy"><option value="first">第一个答中</option><option value="random">随机抽取答中者</option></select></label>
-            <label class="inline-setting"><span>公布答案</span><input name="emoji_announce_answer" type="checkbox"></label>
-            <label class="inline-setting"><span>删除开局命令</span><input name="emoji_delete_command" type="checkbox"></label>
-            <label class="wide-field"><span>题库</span><textarea name="emoji_items" rows="6" placeholder="🌧️ + 🏠 + 🐟 | 漏网之鱼 | 可选提示&#10;🔥 + 🧊 | 冰火两重天,冰火"></textarea></label>
+                <section class="section-card">
+                  <div class="section-head">
+                    <div>
+                      <h3>命令与分词过滤</h3>
+                      <p class="hint">排除常见命令前缀与无意义高频词，提升词云可读性。</p>
+                    </div>
+                  </div>
+                  <div class="setting-form form-grid">
+                    <label class="field"><span>触发命令</span><textarea name="command_prefixes" rows="3" class="mono-input" placeholder="cy&#10;/cy"></textarea></label>
+                    <label class="field"><span>忽略命令前缀</span><textarea name="ignore_command_prefixes" rows="3" class="mono-input" placeholder="/&#10;.&#10;,"></textarea></label>
+                    <label class="field wide-field"><span>额外停用词</span><textarea name="stop_words" rows="4" placeholder="每行一个词"></textarea></label>
+                    <label class="inline-setting toggle-row wide-field">
+                      <div><span>触发后删除命令</span><small>发送词云后自动清理原始触发消息</small></div>
+                      <input name="delete_command" type="checkbox" />
+                    </label>
+                  </div>
+                </section>
+              </form>
+              <div class="ai-save-panel inline-save">
+                <span id="wordCloudSaveState" class="hint">保存后新的词云命令会实时使用新配置。</span>
+              </div>
+            </div>
 
-            <p class="wide-field hint">—— 乱码解码 ——</p>
-            <label class="inline-setting"><span>启用乱码解码</span><input name="decode_enabled" type="checkbox"></label>
-            <label><span>触发命令</span><textarea name="decode_command_prefixes" rows="3" placeholder="/decode&#10;/garble&#10;乱码"></textarea></label>
-            <label><span>答题秒数</span><input name="decode_duration_seconds" type="number" min="5" max="300" step="1"></label>
-            <label><span>奖励文本</span><input name="decode_reward_text" type="text" placeholder="+100"></label>
-            <label><span>赢家策略</span><select name="decode_winner_policy"><option value="first">第一个答中</option><option value="random">随机抽取答中者</option></select></label>
-            <label class="inline-setting"><span>公布答案</span><input name="decode_announce_answer" type="checkbox"></label>
-            <label class="inline-setting"><span>删除开局命令</span><input name="decode_delete_command" type="checkbox"></label>
-            <label class="wide-field"><span>默认短句库</span><textarea name="decode_phrases" rows="5" placeholder="今天加鸡腿&#10;服务器又活了&#10;咖啡续命"></textarea></label>
-          </form>
-          <div class="gif-help">
-            <span class="tag">例：/emoji 200</span>
-            <span class="tag">例：/decode +300</span>
-            <span class="tag">例：/decode 今晚重启NAS</span>
-            <span class="tag">例：/decode 300 今晚重启NAS</span>
-            <span class="tag">幸运词命中后自动回复奖励文本</span>
-          </div>
-          <div class="ai-save-panel inline-save">
-            <span id="chatGamesSaveState" class="hint">保存后新的小游戏请求会实时使用新配置。</span>
+            <aside class="workspace-aside">
+              <section class="aside-card">
+                <h4>指令示例</h4>
+                <div class="gif-help command-chips">
+                  <span class="tag copy-cmd" data-copy="cy">例：cy</span>
+                  <span class="tag copy-cmd" data-copy="cy 500">例：cy 500</span>
+                  <span class="tag copy-cmd" data-copy="/cy 2000">例：/cy 2000</span>
+                </div>
+              </section>
+            </aside>
           </div>
         </section>
-      </section>
 
-      
-
-      
-
-      <section id="aiServices" class="view">
-        <section class="panel ai-config-panel">
-          <div class="panel-head">
-            <div>
-              <h2>AI 服务配置</h2>
-              <p class="hint">这里只管理 AI 服务连接信息；具体功能的触发词、命令和策略在各功能模块页配置。</p>
+        <!-- ==================== MODULE: CHECKIN ==================== -->
+        <section id="moduleCheckin" class="view" data-module-view="checkin" data-save-btn="saveCheckinConfig">
+          <div class="module-banner">
+            <div class="module-banner-meta">
+              <label class="switch module-inline-switch" title="启用或禁用自动签到">
+                <input type="checkbox" data-module-toggle="checkin" aria-label="自动签到总开关" />
+                <span></span>
+              </label>
+              <div class="banner-tags red-packet-summary">
+                <span id="checkinModuleState" class="tag">模块状态</span>
+                <span id="checkinTaskCount" class="tag">签到 0 个</span>
+                <span id="checkinTargetState" class="hint">可手填 chat_id、@username，或加载目标后选择。</span>
+              </div>
             </div>
-            <button id="saveAiServicesConfig" class="primary">保存服务配置</button>
+            <div class="module-actions">
+              <button id="loadCheckinTargets" type="button">加载目标</button>
+              <button id="addCheckinTask" type="button">新增签到</button>
+              <button id="saveCheckinConfig" class="primary" type="button">保存签到配置</button>
+            </div>
           </div>
+
+          <div class="workspace-layout">
+            <div class="workspace-main">
+              <div id="checkinTasks" class="template-list"></div>
+              <div class="ai-save-panel inline-save">
+                <span id="checkinSaveState" class="hint">保存后自动签到调度会实时使用新配置。</span>
+              </div>
+            </div>
+
+            <aside class="workspace-aside">
+              <section class="aside-card cron-guide">
+                <h4>Cron 语法速查</h4>
+                <p class="hint">使用标准 5 段 Cron（分 时 日 月 周）安排发送；输入时会实时解释当前通知方式。</p>
+                <div class="cron-ref-list">
+                  <div><code>*/30 * * * *</code><span>每隔 30 分钟</span></div>
+                  <div><code>0 9 * * *</code><span>每天 09:00</span></div>
+                  <div><code>0 9 * * 1</code><span>每周一 09:00</span></div>
+                  <div><code>0 9 */3 * *</code><span>每月按 3 天步长</span></div>
+                </div>
+              </section>
+            </aside>
+          </div>
+        </section>
+
+        <!-- ==================== MODULE: AUTO FORWARD ==================== -->
+        <section id="moduleAutoForward" class="view" data-module-view="auto_forward" data-save-btn="saveAutoForwardConfig">
+          <div class="module-banner">
+            <div class="module-banner-meta">
+              <label class="switch module-inline-switch" title="启用或禁用自动转发">
+                <input type="checkbox" data-module-toggle="auto_forward" aria-label="自动转发总开关" />
+                <span></span>
+              </label>
+              <div class="banner-tags red-packet-summary">
+                <span id="autoForwardModuleState" class="tag">模块状态</span>
+                <span class="tag">仅响应自己发出的命令</span>
+                <span class="tag">四种转发模式</span>
+              </div>
+            </div>
+            <div class="module-actions">
+              <button id="saveAutoForwardConfig" class="primary" type="button">保存自动转发配置</button>
+            </div>
+          </div>
+
+          <div class="workspace-layout">
+            <div class="workspace-main">
+              <section class="section-card">
+                <div class="section-head">
+                  <div>
+                    <h3>转发模式命令映射</h3>
+                    <p class="hint">回复某条消息发送命令后，按不同模式把被回复的消息回传到当前聊天。</p>
+                  </div>
+                </div>
+                <form id="autoForwardSettingsForm" class="setting-form form-grid">
+                  <label class="field"><span>原生转发命令</span><textarea name="command_prefixes" rows="2" class="mono-input" placeholder=",re"></textarea></label>
+                  <label class="field"><span>复制文本命令</span><textarea name="copy_text_command_prefixes" rows="2" class="mono-input" placeholder=",copy"></textarea></label>
+                  <label class="field"><span>引用包装命令</span><textarea name="quote_command_prefixes" rows="2" class="mono-input" placeholder=",quote"></textarea></label>
+                  <label class="field"><span>仅发链接命令</span><textarea name="link_command_prefixes" rows="2" class="mono-input" placeholder=",link"></textarea></label>
+                  <label class="inline-setting toggle-row wide-field">
+                    <div><span>转发成功后删除命令</span><small>保持群聊整洁，发送成功后移除触发命令本身</small></div>
+                    <input name="delete_command" type="checkbox" />
+                  </label>
+                </form>
+              </section>
+              <div class="ai-save-panel inline-save">
+                <span id="autoForwardSaveState" class="hint">保存后新的转发命令会实时使用新配置。</span>
+              </div>
+            </div>
+
+            <aside class="workspace-aside">
+              <section class="aside-card">
+                <h4>模式说明</h4>
+                <div class="gif-help command-chips">
+                  <span class="tag copy-cmd" data-copy=",re">,re：原生转发，携带原作者</span>
+                  <span class="tag copy-cmd" data-copy=",copy">,copy：只复制文本，不显示原作者</span>
+                  <span class="tag copy-cmd" data-copy=",quote">,quote：带“来自 X”前缀引用包装</span>
+                  <span class="tag copy-cmd" data-copy=",link">,link：公开群消息链接</span>
+                </div>
+              </section>
+            </aside>
+          </div>
+        </section>
+
+        <!-- ==================== MODULE: MAGNET IMPORT ==================== -->
+        <section id="moduleMagnetImport" class="view" data-module-view="magnet_import" data-save-btn="saveMagnetImportConfig">
+          <div class="module-banner">
+            <div class="module-banner-meta">
+              <label class="switch module-inline-switch" title="启用或禁用磁力数据导入">
+                <input type="checkbox" data-module-toggle="magnet_import" aria-label="磁力数据导入总开关" />
+                <span></span>
+              </label>
+              <div class="banner-tags red-packet-summary">
+                <span id="magnetImportModuleState" class="tag">模块状态</span>
+                <span id="magnetImportPasswordState" class="tag">密码状态</span>
+                <span id="magnetImportCount" class="tag">累计导入 0 次</span>
+              </div>
+            </div>
+            <div class="module-actions">
+              <button id="saveMagnetImportConfig" class="primary" type="button">保存磁力数据导入配置</button>
+            </div>
+          </div>
+
+          <div class="subtab-bar" data-tab-group="magnetImport">
+            <button type="button" class="subtab-btn active" data-tab-target="magnet-csv">CSV 与连接</button>
+            <button type="button" class="subtab-btn" data-tab-target="magnet-channel">频道来源</button>
+            <button type="button" class="subtab-btn" data-tab-target="magnet-avdb">AVDB 资源包</button>
+            <button type="button" class="subtab-btn" data-tab-target="magnet-export">每周全量导出</button>
+          </div>
+
+          <div class="workspace-layout">
+            <div class="workspace-main">
+              <form id="magnetImportSettingsForm" class="section-stack">
+                <section class="section-card tab-pane active" data-tab-group="magnetImport" data-tab-pane="magnet-csv">
+                  <div class="section-head">
+                    <div>
+                      <h3>群聊 CSV 监听与 MagnetBoard 连接</h3>
+                      <p class="hint">监听指定群里指定用户发送的 CSV 数据文件，分块下载后导入 MagnetBoard「数据交换中心」，成功后回复原消息并删除临时文件。</p>
+                    </div>
+                  </div>
+                  <div class="setting-form form-grid cols-3">
+                    <label class="field"><span>监听群 ID（每行一个）</span><textarea name="watch_chats" rows="2" class="mono-input" placeholder="-1000000000002"></textarea></label>
+                    <label class="field"><span>发送者用户名（每行一个，不带 @）</span><textarea name="sender_usernames" rows="2" class="mono-input" placeholder="example_sender"></textarea></label>
+                    <label class="field"><span>发送者用户 ID（可选，每行一个）</span><textarea name="sender_ids" rows="2" class="mono-input"></textarea></label>
+                    <label class="field"><span>文件名正则</span><input name="file_name_pattern" type="text" class="mono-input" placeholder="^x1080x.*\.csv$" /></label>
+                    <label class="field"><span>文件大小上限（MB）</span><input name="max_file_size_mb" type="number" min="1" max="4096" step="1" /></label>
+                    <label class="field"><span>下载重试次数</span><input name="download_retries" type="number" min="1" max="20" step="1" /></label>
+                    <label class="field span-all"><span>MagnetBoard 地址</span><input name="api_base_url" type="text" class="mono-input" placeholder="http://127.0.0.1:8022" /></label>
+                    <label class="field"><span>MagnetBoard 用户名</span><input name="api_username" type="text" autocomplete="off" placeholder="admin" /></label>
+                    <label class="field secret-field"><span>MagnetBoard 密码</span><span class="secret-input"><input name="api_password" type="password" autocomplete="new-password" data-secret-input placeholder="留空则不修改" /><button type="button" class="secret-toggle" data-secret-toggle aria-pressed="false">显示</button></span></label>
+                    <label class="field"><span>导入超时（秒）</span><input name="import_timeout_seconds" type="number" min="30" max="7200" step="30" /></label>
+                    <label class="inline-setting toggle-row"><div><span>更新已存在的记录</span></div><input name="update_existing" type="checkbox" /></label>
+                    <label class="inline-setting toggle-row span-2"><div><span>跳过重复记录</span></div><input name="skip_duplicates" type="checkbox" /></label>
+                    <label class="field span-all"><span>导入成功后回复</span><input name="reply_text" type="text" placeholder="已自动导入，谢谢老大" /></label>
+                    <label class="field span-all"><span>手动导入指令（每行一个；仅自己在监听群回复 .csv 时生效，先校对格式、文件内去重再导入）</span><textarea name="import_command_prefixes" rows="2" class="mono-input" placeholder="/import"></textarea></label>
+                  </div>
+                </section>
+
+                <section class="section-card tab-pane" data-tab-group="magnetImport" data-tab-pane="magnet-channel">
+                  <div class="section-head">
+                    <div>
+                      <h3 class="form-section-title">频道来源</h3>
+                      <p class="hint">监听频道帖子，按番号提取 ed2k/磁力链接并自动补封面导入。</p>
+                    </div>
+                    <div class="module-actions">
+                      <button id="magnetChannelFullScan" type="button">全量提取频道</button>
+                      <button id="magnetChannelRebuild" type="button" class="danger">删除并重建频道记录</button>
+                    </div>
+                  </div>
+                  <div class="status-strip-inline">
+                    <span id="magnetChannelCount" class="tag">频道累计新增 0 条</span>
+                    <span id="magnetChannelCursor" class="tag">已处理到消息 #0</span>
+                  </div>
+                  <p id="magnetChannelLast" class="hint status-line">频道来源暂无记录</p>
+                  <div class="setting-form form-grid cols-3">
+                    <label class="inline-setting toggle-row span-all"><div><span>启用频道来源</span></div><input name="channel_enabled" type="checkbox" /></label>
+                    <label class="field"><span>频道 ID</span><input name="channel_chat" type="text" class="mono-input" placeholder="-1000000000005" /></label>
+                    <label class="field span-2"><span>消息链接前缀（作为记录 url 去重）</span><input name="channel_url_prefix" type="text" class="mono-input" placeholder="https://t.me/example_channel" /></label>
+                    <label class="field"><span>来源标识 source_site</span><input name="channel_source_site" type="text" class="mono-input" placeholder="ltx" /></label>
+                    <label class="field"><span>版块 ID forum_id</span><input name="channel_forum_id" type="text" placeholder="ExampleForum" /></label>
+                    <label class="field"><span>版块名 forum_type</span><input name="channel_forum_type" type="text" placeholder="ExampleForum" /></label>
+                    <label class="field"><span>全量每批条数</span><input name="channel_batch_size" type="number" min="10" max="5000" step="10" /></label>
+                    <label class="inline-setting toggle-row span-2"><div><span>按番号补封面（本地同番号优先，再查 JavDB）</span></div><input name="channel_enrich_images" type="checkbox" /></label>
+                  </div>
+                </section>
+
+                <section class="section-card tab-pane" data-tab-group="magnetImport" data-tab-pane="magnet-avdb">
+                  <div class="section-head">
+                    <div>
+                      <h3 class="form-section-title">AVDB 资源包（GitHub release）</h3>
+                      <p class="hint">自动轮询并导入最新 GitHub release 打包资源。</p>
+                    </div>
+                    <div class="module-actions">
+                      <button id="magnetAvdbCheck" type="button">立即检查更新</button>
+                      <button id="magnetAvdbUpdate" type="button">重新导入并更新已有记录</button>
+                      <button id="magnetAvdbRebuild" type="button" class="danger">删除并重建 AVDB 记录</button>
+                    </div>
+                  </div>
+                  <div class="status-strip-inline">
+                    <span id="magnetAvdbTag" class="tag">AVDB 版本 -</span>
+                    <span id="magnetAvdbCount" class="tag">AVDB 累计新增 0 条</span>
+                  </div>
+                  <p id="magnetAvdbLast" class="hint status-line">AVDB 暂无记录</p>
+                  <div class="setting-form form-grid cols-3">
+                    <label class="inline-setting toggle-row span-all"><div><span>定时检查并导入资源包</span></div><input name="avdb_enabled" type="checkbox" /></label>
+                    <label class="field"><span>检查间隔（小时）</span><input name="avdb_interval_hours" type="number" min="1" max="168" step="1" /></label>
+                    <label class="field"><span>GitHub 仓库</span><input name="avdb_repo" type="text" class="mono-input" placeholder="example-org/sample-avdb" /></label>
+                    <label class="field"><span>来源标识 source_site</span><input name="avdb_source_site" type="text" class="mono-input" placeholder="ltx" /></label>
+                    <label class="field span-all"><span>资源包文件名正则</span><input name="avdb_asset_pattern" type="text" class="mono-input" placeholder="^Sample_.*\.zip$" /></label>
+                  </div>
+                </section>
+
+                <section class="section-card tab-pane" data-tab-group="magnetImport" data-tab-pane="magnet-export">
+                  <div class="section-head">
+                    <div>
+                      <h3 class="form-section-title">每周全量导出</h3>
+                      <p class="hint">有新记录时按计划自动导出频道 CSV 并发送到指定群组。</p>
+                    </div>
+                    <div class="module-actions">
+                      <button id="magnetChannelExportNow" type="button">立即导出并发送</button>
+                    </div>
+                  </div>
+                  <div class="status-strip-inline">
+                    <span id="magnetExportCursor" class="tag">已导出到记录 #0</span>
+                  </div>
+                  <p id="magnetExportLast" class="hint status-line">暂无导出记录</p>
+                  <div class="setting-form form-grid cols-3">
+                    <label class="inline-setting toggle-row span-all"><div><span>定时导出频道 CSV 发群</span></div><input name="channel_export_enabled" type="checkbox" /></label>
+                    <label class="field"><span>发送到群 ID</span><input name="channel_export_chat" type="text" class="mono-input" placeholder="-1000000000002" /></label>
+                    <label class="field"><span>每周几</span><select name="channel_export_weekday"><option value="0">周一</option><option value="1">周二</option><option value="2">周三</option><option value="3">周四</option><option value="4">周五</option><option value="5">周六</option><option value="6">周日</option></select></label>
+                    <label class="field"><span>时间（北京时间）</span><input name="channel_export_time" type="time" /></label>
+                    <label class="field span-all"><span>导出来源 source_site</span><input name="channel_export_source_site" type="text" class="mono-input" placeholder="ltx" /></label>
+                  </div>
+                </section>
+              </form>
+              <div class="ai-save-panel inline-save">
+                <span id="magnetImportSaveState" class="hint">保存后新收到的文件会使用新配置。</span>
+              </div>
+            </div>
+
+            <aside class="workspace-aside">
+              <section class="aside-card">
+                <h4>最近导入活动</h4>
+                <p id="magnetImportLast" class="hint status-block">暂无导入记录</p>
+              </section>
+              <section class="aside-card">
+                <h4>导入特性</h4>
+                <div class="gif-help">
+                  <span class="tag">断点续传下载</span>
+                  <span class="tag">同一消息只导入一次</span>
+                  <span class="tag">完成后自动删除文件</span>
+                  <span class="tag">频道实时导入 + 启动补漏</span>
+                  <span class="tag">按消息链接去重</span>
+                </div>
+              </section>
+            </aside>
+          </div>
+        </section>
+
+        <!-- ==================== MODULE: REX WIDGET SYNC ==================== -->
+        <section id="moduleRexWidgetSync" class="view" data-module-view="rex_widget_sync" data-save-btn="saveRexWidgetSyncConfig">
+          <div class="module-banner">
+            <div class="module-banner-meta">
+              <label class="switch module-inline-switch" title="启用或禁用 Rex 模块同步">
+                <input type="checkbox" data-module-toggle="rex_widget_sync" aria-label="Rex 模块同步总开关" />
+                <span></span>
+              </label>
+              <div class="banner-tags red-packet-summary">
+                <span id="rexWidgetModuleState" class="tag">模块状态</span>
+                <span id="rexWidgetPasswordState" class="tag">密码状态</span>
+                <span id="rexWidgetCounts" class="tag">新增 0 · 更新 0</span>
+                <span id="rexWidgetCursor" class="tag">已处理到消息 #0</span>
+              </div>
+            </div>
+            <div class="module-actions">
+              <button id="rexWidgetCatchUp" type="button">立即补漏</button>
+              <button id="rexWidgetFullScan" type="button">全量同步频道</button>
+              <button id="saveRexWidgetSyncConfig" class="primary" type="button">保存 Rex 模块同步配置</button>
+            </div>
+          </div>
+
+          <div class="workspace-layout">
+            <div class="workspace-main">
+              <section class="section-card">
+                <div class="section-head">
+                  <div>
+                    <h3>频道与 Hub 连接配置</h3>
+                    <p class="hint">监听「REX 模块分享」频道的 .js 模块帖子：新模块上传到 Rex Widget Hub 并加入指定合集；已有模块仅在版本号更高时替换。</p>
+                  </div>
+                </div>
+                <form id="rexWidgetSyncSettingsForm" class="setting-form form-grid cols-3">
+                  <label class="field"><span>频道 ID</span><input name="channel_chat" type="text" class="mono-input" placeholder="-1000000000006" /></label>
+                  <label class="field span-2"><span>Hub 地址</span><input name="hub_base_url" type="text" class="mono-input" placeholder="http://127.0.0.1:3398" /></label>
+                  <label class="field secret-field"><span>Hub 管理密码</span><span class="secret-input"><input name="hub_password" type="password" autocomplete="new-password" data-secret-input placeholder="留空则不修改" /><button type="button" class="secret-toggle" data-secret-toggle aria-pressed="false">显示</button></span></label>
+                  <label class="field"><span>目标合集 slug</span><input name="collection_slug" type="text" class="mono-input" placeholder="ExampleUser" /></label>
+                  <label class="field"><span>新模块分组 ID（可选）</span><input name="group_id" type="text" class="mono-input" /></label>
+                  <label class="field"><span>文件名正则</span><input name="file_name_pattern" type="text" class="mono-input" placeholder="\.js$" /></label>
+                  <label class="field"><span>排除文件名正则</span><input name="exclude_name_pattern" type="text" class="mono-input" placeholder="[\(（]\s*(?:FW|Forward)\s*[\)）]" /></label>
+                  <label class="field"><span>文件大小上限（MB，最大 25）</span><input name="max_file_size_mb" type="number" min="1" max="25" step="1" /></label>
+                  <label class="field"><span>Hub 请求超时（秒）</span><input name="request_timeout_seconds" type="number" min="10" max="600" step="10" /></label>
+                  <label class="inline-setting toggle-row span-2"><div><span>帖子无附件时跟随「模块地址」消息链接取文件</span></div><input name="follow_links" type="checkbox" /></label>
+                  <label class="inline-setting toggle-row span-all"><div><span>用帖子标题锁定 Hub 模块标题</span></div><input name="lock_title" type="checkbox" /></label>
+                  <label class="field span-all"><span>忽略的模块 key（每行一个，文件名去掉版本号后的小写名；用于丢弃已被新模块取代的旧线）</span><textarea name="ignore_keys" rows="3" class="mono-input" placeholder="douyu"></textarea></label>
+                </form>
+              </section>
+              <div class="ai-save-panel inline-save">
+                <span id="rexWidgetSyncSaveState" class="hint">保存后新收到的帖子会使用新配置。</span>
+              </div>
+            </div>
+
+            <aside class="workspace-aside">
+              <section class="aside-card">
+                <h4>同步日志</h4>
+                <p id="rexWidgetLast" class="hint status-block">暂无同步记录</p>
+                <div id="rexWidgetHistory" class="activity-feed"></div>
+              </section>
+              <section class="aside-card">
+                <h4>同步规则</h4>
+                <div class="gif-help">
+                  <span class="tag">实时监听 + 启动补漏</span>
+                  <span class="tag">全量同步每个模块只取最新一版</span>
+                  <span class="tag">版本更高才替换</span>
+                  <span class="tag">排除 (FW) Forward 版本</span>
+                </div>
+              </section>
+            </aside>
+          </div>
+        </section>
+
+        <!-- ==================== MODULE: QUOTE ==================== -->
+        <section id="moduleQuote" class="view" data-module-view="quote" data-save-btn="saveQuoteConfig">
+          <div class="module-banner">
+            <div class="module-banner-meta">
+              <label class="switch module-inline-switch" title="启用或禁用语录贴纸">
+                <input type="checkbox" data-module-toggle="quote" aria-label="语录贴纸总开关" />
+                <span></span>
+              </label>
+              <div class="banner-tags red-packet-summary">
+                <span id="quoteModuleState" class="tag">模块状态</span>
+                <span class="tag">/q s 存贴纸包</span>
+                <span class="tag">TGS 媒体需 rlottie-python</span>
+              </div>
+            </div>
+            <div class="module-actions">
+              <button id="saveQuoteConfig" class="primary" type="button">保存语录配置</button>
+            </div>
+          </div>
+
+          <div class="workspace-layout">
+            <div class="workspace-main">
+              <section class="section-card">
+                <div class="section-head">
+                  <div>
+                    <h3>渲染接口与样式配置</h3>
+                    <p class="hint">回复消息用 /q 或 语录 生成语录贴纸；渲染由第三方 quote-api 完成（消息文本与发送者头像会发送给该服务）。</p>
+                  </div>
+                </div>
+                <form id="quoteSettingsForm" class="setting-form form-grid cols-3">
+                  <label class="field span-all"><span>quote-api 地址</span><input name="api_url" type="text" class="mono-input" placeholder="https://quote-api-enhanced.zhetengsha.eu.org/generate.webp" /></label>
+                  <label class="field"><span>触发命令</span><textarea name="command_prefixes" rows="3" class="mono-input" placeholder="/q&#10;语录"></textarea></label>
+                  <label class="field"><span>贴纸包短名</span><input name="sticker_set_short_name" type="text" class="mono-input" placeholder="留空则不启用 /q s" /></label>
+                  <label class="field"><span>背景色</span><input name="background_color" type="text" class="mono-input" placeholder="#1b1429" /></label>
+                  <label class="field"><span>最多合成条数</span><input name="max_messages" type="number" min="1" max="10" step="1" /></label>
+                  <label class="field"><span>画布宽度</span><input name="width" type="number" min="256" max="2048" step="1" /></label>
+                  <label class="field"><span>画布高度</span><input name="height" type="number" min="256" max="4096" step="1" /></label>
+                  <label class="field"><span>缩放</span><input name="scale" type="number" min="1" max="4" step="1" /></label>
+                  <label class="field"><span>Emoji 风格</span><input name="emoji_brand" type="text" placeholder="apple" /></label>
+                  <label class="field"><span>超时秒数</span><input name="timeout_seconds" type="number" min="5" max="300" step="1" /></label>
+                  <label class="field span-all"><span>临时目录</span><input name="tmp_dir" type="text" class="mono-input" placeholder="runtime/tmp" /></label>
+                </form>
+              </section>
+              <div class="ai-save-panel inline-save">
+                <span id="quoteSaveState" class="hint">保存后新的语录命令会实时使用新配置。</span>
+              </div>
+            </div>
+
+            <aside class="workspace-aside">
+              <section class="aside-card">
+                <h4>指令示例</h4>
+                <div class="gif-help command-chips">
+                  <span class="tag copy-cmd" data-copy="语录">例：语录</span>
+                  <span class="tag copy-cmd" data-copy="/q 3">例：/q 3</span>
+                  <span class="tag copy-cmd" data-copy="/q r">例：/q r</span>
+                  <span class="tag copy-cmd" data-copy="/q f 自定义文字">例：/q f 自定义文字</span>
+                  <span class="tag copy-cmd" data-copy="/q config sticker mypack">例：/q config sticker mypack</span>
+                </div>
+              </section>
+            </aside>
+          </div>
+        </section>
+
+        <!-- ==================== MODULE: CHAT GAMES ==================== -->
+        <section id="moduleChatGames" class="view" data-module-view="chat_games" data-save-btn="saveChatGamesConfig">
+          <div class="module-banner">
+            <div class="module-banner-meta">
+              <label class="switch module-inline-switch" title="启用或禁用聊天小游戏">
+                <input type="checkbox" data-module-toggle="chat_games" aria-label="聊天小游戏总开关" />
+                <span></span>
+              </label>
+              <div class="banner-tags red-packet-summary">
+                <span id="chatGamesModuleState" class="tag">模块状态</span>
+                <span class="tag">今日幸运词</span>
+                <span class="tag">Emoji 图谜</span>
+                <span class="tag">乱码解码</span>
+              </div>
+            </div>
+            <div class="module-actions">
+              <button id="saveChatGamesConfig" class="primary" type="button">保存小游戏配置</button>
+            </div>
+          </div>
+
+          <div class="subtab-bar" data-tab-group="chatGames">
+            <button type="button" class="subtab-btn active" data-tab-target="game-lucky">今日幸运词</button>
+            <button type="button" class="subtab-btn" data-tab-target="game-emoji">Emoji 图谜</button>
+            <button type="button" class="subtab-btn" data-tab-target="game-decode">乱码解码</button>
+            <button type="button" class="subtab-btn" data-tab-target="game-storage">存储路径</button>
+          </div>
+
+          <div class="workspace-layout">
+            <div class="workspace-main">
+              <form id="chatGamesSettingsForm" class="section-stack">
+                <section class="section-card tab-pane active" data-tab-group="chatGames" data-tab-pane="game-lucky">
+                  <div class="section-head">
+                    <div>
+                      <h3>今日幸运词</h3>
+                      <p class="hint">群友自然发言命中当日隐藏词时自动回复加分指令。</p>
+                    </div>
+                  </div>
+                  <div class="setting-form form-grid cols-3">
+                    <label class="inline-setting toggle-row span-all"><div><span>启用幸运词</span></div><input name="lucky_enabled" type="checkbox" /></label>
+                    <label class="field"><span>奖励文本</span><input name="lucky_reward_text" type="text" placeholder="+100" /></label>
+                    <label class="field"><span>每群每日次数</span><input name="lucky_daily_limit_per_chat" type="number" min="0" max="50" step="1" /></label>
+                    <label class="field"><span>每人每日次数</span><input name="lucky_per_user_daily_limit" type="number" min="0" max="20" step="1" /></label>
+                    <label class="field"><span>最短消息长度</span><input name="lucky_min_message_length" type="number" min="1" max="80" step="1" /></label>
+                    <label class="field span-2"><span>忽略前缀</span><textarea name="lucky_ignore_command_prefixes" rows="2" class="mono-input" placeholder="/&#10;.&#10;,&#10;+"></textarea></label>
+                    <label class="field span-all"><span>幸运词库（每行一个）</span><textarea name="lucky_words" rows="6" placeholder="咖啡&#10;服务器&#10;重启"></textarea></label>
+                  </div>
+                </section>
+
+                <section class="section-card tab-pane" data-tab-group="chatGames" data-tab-pane="game-emoji">
+                  <div class="section-head">
+                    <div>
+                      <h3>Emoji 图谜</h3>
+                      <p class="hint">通过 Emoji 组合提示成语或热词，支持按首中或随机抽取赢家。</p>
+                    </div>
+                  </div>
+                  <div class="setting-form form-grid cols-3">
+                    <label class="inline-setting toggle-row span-all"><div><span>启用图谜</span></div><input name="emoji_enabled" type="checkbox" /></label>
+                    <label class="field"><span>答题秒数</span><input name="emoji_duration_seconds" type="number" min="5" max="300" step="1" /></label>
+                    <label class="field"><span>奖励文本</span><input name="emoji_reward_text" type="text" placeholder="+100" /></label>
+                    <label class="field"><span>赢家策略</span><select name="emoji_winner_policy"><option value="first">第一个答中</option><option value="random">随机抽取答中者</option></select></label>
+                    <label class="inline-setting toggle-row"><div><span>公布答案</span></div><input name="emoji_announce_answer" type="checkbox" /></label>
+                    <label class="inline-setting toggle-row span-2"><div><span>删除开局命令</span></div><input name="emoji_delete_command" type="checkbox" /></label>
+                    <label class="field span-all"><span>触发命令</span><textarea name="emoji_command_prefixes" rows="2" class="mono-input" placeholder="/emoji&#10;/emojiriddle&#10;图谜"></textarea></label>
+                    <label class="field span-all"><span>题库（格式：谜面 | 答案1,答案2 | 可选提示）</span><textarea name="emoji_items" rows="7" placeholder="🌧️ + 🏠 + 🐟 | 漏网之鱼 | 可选提示&#10;🔥 + 🧊 | 冰火两重天,冰火"></textarea></label>
+                  </div>
+                </section>
+
+                <section class="section-card tab-pane" data-tab-group="chatGames" data-tab-pane="game-decode">
+                  <div class="section-head">
+                    <div>
+                      <h3>乱码解码</h3>
+                      <p class="hint">生成视觉干扰/乱码短句图片，最快还原原文者获胜。</p>
+                    </div>
+                  </div>
+                  <div class="setting-form form-grid cols-3">
+                    <label class="inline-setting toggle-row span-all"><div><span>启用乱码解码</span></div><input name="decode_enabled" type="checkbox" /></label>
+                    <label class="field"><span>答题秒数</span><input name="decode_duration_seconds" type="number" min="5" max="300" step="1" /></label>
+                    <label class="field"><span>奖励文本</span><input name="decode_reward_text" type="text" placeholder="+100" /></label>
+                    <label class="field"><span>赢家策略</span><select name="decode_winner_policy"><option value="first">第一个答中</option><option value="random">随机抽取答中者</option></select></label>
+                    <label class="inline-setting toggle-row"><div><span>公布答案</span></div><input name="decode_announce_answer" type="checkbox" /></label>
+                    <label class="inline-setting toggle-row span-2"><div><span>删除开局命令</span></div><input name="decode_delete_command" type="checkbox" /></label>
+                    <label class="field span-all"><span>触发命令</span><textarea name="decode_command_prefixes" rows="2" class="mono-input" placeholder="/decode&#10;/garble&#10;乱码"></textarea></label>
+                    <label class="field span-all"><span>默认短句库</span><textarea name="decode_phrases" rows="6" placeholder="今天加鸡腿&#10;服务器又活了&#10;咖啡续命"></textarea></label>
+                  </div>
+                </section>
+
+                <section class="section-card tab-pane" data-tab-group="chatGames" data-tab-pane="game-storage">
+                  <div class="section-head">
+                    <div>
+                      <h3>状态文件与输出目录</h3>
+                      <p class="hint">记录每日次数与临时生成的游戏图片位置。</p>
+                    </div>
+                  </div>
+                  <div class="setting-form form-grid">
+                    <label class="field wide-field"><span>状态文件</span><input name="state_store" type="text" class="mono-input" placeholder="runtime/data/chat_games_state.json" /></label>
+                    <label class="field wide-field"><span>图片输出目录</span><input name="output_dir" type="text" class="mono-input" placeholder="runtime/data/generated_chat_games" /></label>
+                  </div>
+                </section>
+              </form>
+              <div class="ai-save-panel inline-save">
+                <span id="chatGamesSaveState" class="hint">保存后新的小游戏请求会实时使用新配置。</span>
+              </div>
+            </div>
+
+            <aside class="workspace-aside">
+              <section class="aside-card">
+                <h4>开局示例</h4>
+                <div class="gif-help command-chips">
+                  <span class="tag copy-cmd" data-copy="/emoji 200">例：/emoji 200</span>
+                  <span class="tag copy-cmd" data-copy="/decode +300">例：/decode +300</span>
+                  <span class="tag copy-cmd" data-copy="/decode 今晚重启NAS">例：/decode 今晚重启NAS</span>
+                  <span class="tag copy-cmd" data-copy="/decode 300 今晚重启NAS">例：/decode 300 今晚重启NAS</span>
+                  <span class="tag">幸运词命中后自动回复奖励文本</span>
+                </div>
+              </section>
+            </aside>
+          </div>
+        </section>
+
+        <!-- ==================== AI SERVICES ==================== -->
+        <section id="aiServices" class="view" data-save-btn="saveAiServicesConfig">
+          <div class="module-banner">
+            <div class="module-banner-meta">
+              <span id="aiServiceSaveState" class="hint">这里只管理 AI 服务连接信息；具体功能的触发词、命令和策略在各功能模块页配置。</span>
+            </div>
+            <div class="module-actions">
+              <button type="button" class="ghost-btn" data-jump-view="aiUsage">查看用量统计</button>
+              <button id="saveAiServicesConfig" class="primary" type="button">保存服务配置</button>
+            </div>
+          </div>
+
           <div class="ai-service-layout">
-            <section class="provider-card">
+            <section class="provider-card section-card">
               <div class="provider-head">
-                <h3>回复服务</h3>
+                <div>
+                  <h3>回复与视觉服务</h3>
+                  <p class="hint">供 AI 自动回复、群友画像与 AI 解密共用。</p>
+                </div>
                 <span id="replyKeyState" class="mini-state">未配置 Key</span>
               </div>
-              <form class="service-form ai-service-form" data-provider="reply_provider">
-                <label><span>服务名称</span><input name="name" type="text" placeholder="default"></label>
-                <label><span>提供商类型</span><select name="provider_type"><option value="openai">OpenAI（Responses）</option><option value="claude">Claude / Anthropic（Messages）</option><option value="openai-compatible">OpenAI-Compatible（Responses）</option><option value="openai-compatible-chat">OpenAI-Compatible（Chat Completions）</option></select></label>
-                <label><span>URL</span><input name="base_url" type="text" placeholder="https://api.openai.com/v1"></label>
-                <label class="secret-field"><span>API Key</span><span class="secret-input"><input name="api_key" type="password" data-secret-input placeholder="输入时可见，留空则不修改"><button type="button" class="secret-toggle" data-secret-toggle aria-pressed="false">显示</button></span></label>
-                <label><span>模型</span><input name="model" type="text" placeholder="gpt-5.5"></label>
+              <form class="service-form ai-service-form form-grid single-col" data-provider="reply_provider">
+                <label class="field"><span>服务名称</span><input name="name" type="text" placeholder="default" /></label>
+                <label class="field"><span>提供商类型</span><select name="provider_type"><option value="openai">OpenAI（Responses）</option><option value="claude">Claude / Anthropic（Messages）</option><option value="openai-compatible">OpenAI-Compatible（Responses）</option><option value="openai-compatible-chat">OpenAI-Compatible（Chat Completions）</option></select></label>
+                <label class="field"><span>URL</span><input name="base_url" type="text" class="mono-input" placeholder="https://api.openai.com/v1" /></label>
+                <label class="field secret-field"><span>API Key</span><span class="secret-input"><input name="api_key" type="password" data-secret-input placeholder="留空则保持原值" /><button type="button" class="secret-toggle" data-secret-toggle aria-pressed="false">显示</button></span></label>
+                <label class="field"><span>模型</span><input name="model" type="text" class="mono-input" placeholder="gpt-5.5" /></label>
               </form>
             </section>
-            <section class="provider-card">
+
+            <section class="provider-card section-card">
               <div class="provider-head">
-                <h3>生图服务</h3>
+                <div>
+                  <h3>生图专用服务</h3>
+                  <p class="hint">供 AI 生图模块使用；API Key 留空时默认沿用回复服务 Key。</p>
+                </div>
                 <span id="imageKeyState" class="mini-state">未配置 Key</span>
               </div>
-              <form class="service-form ai-service-form" data-provider="image_provider">
-                <label><span>服务名称</span><input name="name" type="text" placeholder="image"></label>
-                <label><span>提供商类型</span><select name="provider_type"><option value="openai">OpenAI（Responses）</option><option value="claude">Claude / Anthropic（Messages）</option><option value="openai-compatible">OpenAI-Compatible（Responses）</option><option value="openai-compatible-chat">OpenAI-Compatible（Chat Completions）</option><option value="xai-imagine">xAI-Compatible（Imagine Images）</option></select></label>
-                <label><span>URL</span><input name="base_url" type="text" placeholder="https://api.openai.com/v1"></label>
-                <label class="secret-field"><span>API Key</span><span class="secret-input"><input name="api_key" type="password" data-secret-input placeholder="输入时可见，留空则沿用回复 Key"><button type="button" class="secret-toggle" data-secret-toggle aria-pressed="false">显示</button></span></label>
-                <label><span>模型</span><input name="model" type="text" placeholder="gpt-image-2"></label>
+              <form class="service-form ai-service-form form-grid single-col" data-provider="image_provider">
+                <label class="field"><span>服务名称</span><input name="name" type="text" placeholder="image" /></label>
+                <label class="field"><span>提供商类型</span><select name="provider_type"><option value="openai">OpenAI（Responses）</option><option value="claude">Claude / Anthropic（Messages）</option><option value="openai-compatible">OpenAI-Compatible（Responses）</option><option value="openai-compatible-chat">OpenAI-Compatible（Chat Completions）</option><option value="xai-imagine">xAI-Compatible（Imagine Images）</option></select></label>
+                <label class="field"><span>URL</span><input name="base_url" type="text" class="mono-input" placeholder="https://api.openai.com/v1" /></label>
+                <label class="field secret-field"><span>API Key</span><span class="secret-input"><input name="api_key" type="password" data-secret-input placeholder="留空保持原值；未单独配置时沿用回复 Key" /><button type="button" class="secret-toggle" data-secret-toggle aria-pressed="false">显示</button></span></label>
+                <label class="field"><span>模型</span><input name="model" type="text" class="mono-input" placeholder="gpt-image-2" /></label>
               </form>
             </section>
           </div>
-          <div class="ai-save-panel inline-save">
-            <span id="aiServiceSaveState" class="hint">保存后新的 AI 请求会使用新的服务连接信息。</span>
-          </div>
         </section>
-      </section>
 
-      <section id="aiUsage" class="view">
+        <!-- ==================== AI USAGE ==================== -->
+        <section id="aiUsage" class="view view-wide">
           <section class="panel">
             <div class="panel-head">
-              <h2>AI Token 用量</h2>
+              <div class="panel-title-wrap">
+                <h2>AI Token 用量总览</h2>
+                <p class="panel-caption">按时间窗口统计请求量、Token 消耗、吞吐速率与平均响应耗时</p>
+              </div>
               <div class="usage-actions">
-                <select id="usageRange">
+                <select id="usageRange" aria-label="统计时间范围">
                   <option value="today">今日</option>
                   <option value="7d">近 7 天</option>
                   <option value="30d">近 30 天</option>
                   <option value="all">全部</option>
                 </select>
-                <button id="refreshUsage">刷新</button>
+                <button id="refreshUsage" type="button">刷新</button>
               </div>
             </div>
             <div id="usageKpis" class="usage-kpis"></div>
           </section>
+
           <div class="split">
             <section class="panel">
               <div class="panel-head"><h2>按模型统计</h2></div>
@@ -660,59 +1522,451 @@
               <div class="usage-table-wrap">
                 <table class="usage-table">
                   <thead><tr><th>功能</th><th>请求数</th><th>Token</th><th>平均耗时</th><th>成功率</th></tr></thead>
-              <tbody id="usageFeatureRows"></tbody>
+                  <tbody id="usageFeatureRows"></tbody>
                 </table>
               </div>
             </section>
           </div>
-      </section>
+        </section>
 
-      <section id="logs" class="view">
-        <div class="split wide-left">
-          <section class="panel">
-            <div class="panel-head">
-              <h2>实时日志</h2>
-              <div class="log-actions">
-                <label class="auto-refresh-toggle"><input id="autoRefreshLogs" type="checkbox" checked> 自动刷新</label>
-                <label class="log-refresh-interval">间隔 <input id="logRefreshInterval" type="number" min="0.1" step="0.1" value="1"> 秒</label>
-                <span id="logRefreshState" class="hint">实时日志每 1 秒刷新</span>
-                <button id="refreshLogs">刷新</button>
+        <!-- ==================== LOGS ==================== -->
+        <section id="logs" class="view view-wide logs-muvyo">
+          <div class="log-top-nav">
+            <div class="log-source-tabs" role="tablist" aria-label="日志来源">
+              <button type="button" class="log-source-tab active" data-log-tab="live" role="tab" aria-selected="true">
+                <span class="nav-ico mini-ico" data-icon="logs"></span>
+                <span>系统日志</span>
+              </button>
+              <button type="button" class="log-source-tab" data-log-tab="archive" role="tab" aria-selected="false">
+                <span class="nav-ico mini-ico" data-icon="archive"></span>
+                <span>历史归档</span>
+                <span id="logArchiveCount" class="log-tab-count">0</span>
+              </button>
+            </div>
+            <button type="button" class="log-settings-link" data-jump-view="settings">
+              <span class="nav-ico mini-ico" data-icon="sliders"></span>
+              <span>系统配置</span>
+            </button>
+          </div>
+
+          <div class="log-header-bar">
+            <div class="log-header-copy">
+              <h2 id="logSourceTitle">系统日志</h2>
+              <p id="logRefreshState" class="log-header-sub">Telebot 本体运行日志，每 1 秒自动拉取。</p>
+            </div>
+            <div class="log-action-pills">
+              <button id="downloadActiveLogBtn" type="button" class="log-pill-btn" title="下载当前日志文件">
+                <span class="nav-ico mini-ico" data-icon="download"></span>
+                <span>下载日志</span>
+              </button>
+              <button id="toggleLogAutoScrollBtn" type="button" class="log-pill-btn" aria-pressed="true" title="暂停或恢复自动滚动到底部">
+                <span class="nav-ico mini-ico" data-icon="pause"></span>
+                <span>暂停滚动</span>
+              </button>
+              <button id="toggleLogWrapBtn" type="button" class="log-pill-btn is-active" aria-pressed="true" title="切换日志自动换行">
+                <span class="nav-ico mini-ico" data-icon="wrap"></span>
+                <span>自动换行</span>
+              </button>
+              <button id="copyLogsBtn" type="button" class="log-pill-btn" title="复制当前日志内容">
+                <span class="nav-ico mini-ico" data-icon="copy"></span>
+                <span>复制</span>
+              </button>
+              <button id="clearLogsBtn" type="button" class="log-pill-btn" title="清空当前视图">
+                <span class="nav-ico mini-ico" data-icon="trash"></span>
+                <span>清空</span>
+              </button>
+            </div>
+          </div>
+
+          <div id="logArchiveStrip" class="log-archive-strip hidden">
+            <div class="log-archive-strip-head">
+              <span>选择历史归档文件</span>
+              <small id="logArchiveHint" class="hint">点击文件名即可在下方终端查看</small>
+            </div>
+            <div id="logFiles" class="log-archive-chips"></div>
+          </div>
+
+          <div class="log-filter-bar">
+            <div class="log-filter-left">
+              <div class="log-select-wrap">
+                <select id="logLevelSelect" class="log-level-select" aria-label="日志级别">
+                  <option value="ALL">全部级别</option>
+                  <option value="INFO">INFO</option>
+                  <option value="WARNING">WARN</option>
+                  <option value="ERROR">ERROR</option>
+                  <option value="DEBUG">DEBUG</option>
+                </select>
               </div>
+              <div class="log-search-box">
+                <input id="logSearchInput" type="search" placeholder="过滤关键词…" autocomplete="off" />
+              </div>
+              <label class="log-live-chip" title="开启或关闭定时拉取实时日志">
+                <input id="autoRefreshLogs" type="checkbox" checked />
+                <span>自动拉取</span>
+              </label>
+              <label class="log-interval-chip" title="实时日志轮询间隔">
+                <input id="logRefreshInterval" type="number" min="0.1" step="0.1" value="1" />
+                <span>秒</span>
+              </label>
+              <button id="refreshLogs" type="button" class="log-pill-btn compact" title="立即刷新日志">
+                <span class="nav-ico mini-ico" data-icon="refresh"></span>
+                <span>刷新</span>
+              </button>
             </div>
-            <pre id="liveLogs" class="log-box large"></pre>
-          </section>
-          <section class="panel">
-            <div class="panel-head"><h2>历史日志</h2></div>
-            <div id="logFiles" class="file-list"></div>
-          </section>
-        </div>
-      </section>
+            <span id="logLineCount" class="log-line-counter">0 / 0 行</span>
+          </div>
 
-      <section id="settings" class="view">
-        <section class="panel settings-panel">
-          <div class="panel-head">
-            <div>
-              <h2>监听群组</h2>
-              <p class="hint">点击加载群组后勾选需要监听的 Telegram 群组。</p>
-            </div>
-            <div class="group-actions">
-              <button id="loadGroups">加载群组</button>
-              <button id="saveGroups" class="primary">保存</button>
-            </div>
-          </div>
-          <div class="group-summary">
-            <strong id="groupCount">已选择 0 个群组</strong>
-            <span id="groupLoadState">尚未加载群组列表</span>
-          </div>
-          <div id="selectedGroupNames" class="selected-group-names"></div>
-          <div id="groupList" class="group-list">
-            <div class="empty-state">加载后可以直接勾选群组；如果 Telegram 未连接，请先确认 session 和 api_id/api_hash 配置。</div>
+          <div class="log-terminal-shell">
+            <pre id="liveLogs" class="log-box muvyo-terminal"></pre>
+            <button id="logScrollBottomBtn" type="button" class="log-scroll-bottom-btn hidden" title="回到底部并恢复自动滚动">
+              <span class="nav-ico mini-ico" data-icon="arrowDown"></span>
+              <span>回到底部</span>
+            </button>
           </div>
         </section>
-      </section>
-    </main>
+
+        <!-- ==================== SIDEBAR ARRANGE ==================== -->
+        <section id="sidebarArrange" class="view view-wide">
+          <div class="arrange-search-bar">
+            <span class="nav-ico" data-icon="search"></span>
+            <input id="arrangeSearchInput" type="search" placeholder="搜索功能、模块或设置项…" autocomplete="off" />
+          </div>
+
+          <div class="arrange-split">
+            <section class="panel arrange-col">
+              <div class="arrange-col-head">
+                <div class="arrange-col-meta">
+                  <h2>结构</h2>
+                  <span id="arrangeStructureMeta" class="arrange-meta-text">0 组 · 0 项 · 分组名 = 分隔符</span>
+                  <span id="arrangeSaveStatus" class="arrange-save-pill" role="status" aria-live="polite">已持久化保存</span>
+                </div>
+                <div class="arrange-head-actions">
+                  <button id="arrangeApplyRecommended" type="button" class="ghost-btn compact-btn">
+                    <span class="nav-ico mini-ico" data-icon="spark"></span>推荐结构
+                  </button>
+                  <button id="arrangeAddGroup" type="button" class="ghost-btn compact-btn">+ 分组</button>
+                  <button id="arrangeResetDefault" type="button" class="ghost-btn compact-btn">恢复默认</button>
+                </div>
+              </div>
+              <div id="arrangeGroupsHost" class="arrange-groups-list"></div>
+            </section>
+
+            <section class="panel arrange-col">
+              <div class="arrange-col-head">
+                <div class="arrange-col-meta">
+                  <h2>全部功能</h2>
+                  <span id="arrangePoolMeta" class="arrange-meta-text">0 待选 / 0</span>
+                </div>
+                <span class="arrange-col-tip">点名字打开 · + 加入 · − 移出</span>
+              </div>
+              <div id="arrangePoolHost" class="arrange-pool-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <!-- ==================== SETTINGS ==================== -->
+        <section id="settings" class="view view-wide" data-save-btn="saveGroups">
+          <div class="arrange-search-bar">
+            <span class="nav-ico" data-icon="search"></span>
+            <input id="settingsHubSearch" type="search" placeholder="搜索配置项…" autocomplete="off" />
+          </div>
+
+          <div class="settings-hub-groups" id="settingsHubGroups">
+            <div class="settings-hub-section">
+              <div class="settings-hub-label">设置 · 连接与监听</div>
+              <div class="summary-card-grid">
+                <article class="summary-card" data-open-section="settingsGroupsCard" data-search-terms="telegram 监听 群组 频道 groups" tabindex="0" role="button">
+                  <div class="summary-card-top">
+                    <div class="summary-card-title-row">
+                      <span class="summary-card-ico" data-icon="settings"></span>
+                      <h3>Telegram 监听群组</h3>
+                    </div>
+                    <div class="summary-card-right">
+                      <span id="settingsGroupsBadge" class="summary-pill ok">0 个已选</span>
+                      <span class="summary-card-more" aria-hidden="true">⋯</span>
+                    </div>
+                  </div>
+                  <p class="summary-card-desc">选择当前账号可见的群组与频道，勾选后实时生效。</p>
+                  <div id="settingsGroupsPreview" class="summary-card-chips"></div>
+                </article>
+
+                <article class="summary-card" data-jump-view="aiServices" data-search-terms="ai 模型 服务 供应商 api key" tabindex="0" role="button">
+                  <div class="summary-card-top">
+                    <div class="summary-card-title-row">
+                      <span class="summary-card-ico" data-icon="aiServices"></span>
+                      <h3>AI 模型与服务配置</h3>
+                    </div>
+                    <div class="summary-card-right">
+                      <span id="settingsAiSummaryBadge" class="summary-pill">待读取</span>
+                      <span class="summary-card-more" aria-hidden="true">⋯</span>
+                    </div>
+                  </div>
+                  <p class="summary-card-desc">统一维护回复、视觉与生图供应商连接，各功能模块共享配置。</p>
+                </article>
+              </div>
+            </div>
+
+            <div class="settings-hub-section">
+              <div class="settings-hub-label">设置 · 界面与个性化</div>
+              <div class="summary-card-grid">
+                <article class="summary-card" data-open-appearance data-search-terms="外观 皮肤 壁纸 背景 玻璃 动态 主题 颜色" tabindex="0" role="button">
+                  <div class="summary-card-top">
+                    <div class="summary-card-title-row">
+                      <span class="summary-card-ico" data-icon="palette"></span>
+                      <h3>外观与背景</h3>
+                    </div>
+                    <div class="summary-card-right">
+                      <span id="settingsAppearanceBadge" class="summary-pill ok">暖暮绯红 · 极光流动</span>
+                      <span class="summary-card-more" aria-hidden="true">⋯</span>
+                    </div>
+                  </div>
+                  <p class="summary-card-desc">半透明玻璃浓度、自定义壁纸、动态背景效果与鼠标微交互。</p>
+                </article>
+
+                <article class="summary-card" data-jump-view="sidebarArrange" data-search-terms="侧边栏 编排 导航 分组 排序" tabindex="0" role="button">
+                  <div class="summary-card-top">
+                    <div class="summary-card-title-row">
+                      <span class="summary-card-ico" data-icon="arrange"></span>
+                      <h3>侧边栏编排</h3>
+                    </div>
+                    <div class="summary-card-right">
+                      <span id="settingsSidebarBadge" class="summary-pill ok">默认分组</span>
+                      <span class="summary-card-more" aria-hidden="true">⋯</span>
+                    </div>
+                  </div>
+                  <p class="summary-card-desc">自定义左侧导航栏的分组、名称、显示项与拖拽排序。</p>
+                </article>
+              </div>
+            </div>
+          </div>
+
+          <section id="settingsGroupsCard" class="panel settings-panel section-card modal-card-source" data-modal-title="Telegram 监听群组" data-modal-subtitle="加载当前账号可见的群组与频道，勾选后实时生效" data-modal-icon="settings">
+            <div class="panel-head">
+              <div class="panel-title-wrap">
+                <h2>Telegram 监听群组</h2>
+                <p class="panel-caption">加载当前账号可见的群组与频道，勾选后实时生效。</p>
+              </div>
+              <div class="group-actions">
+                <button id="loadGroups" type="button">加载群组</button>
+                <button id="saveGroups" class="primary" type="button">保存</button>
+              </div>
+            </div>
+            <div class="group-summary">
+              <div class="group-summary-left">
+                <strong id="groupCount">已选择 0 个群组</strong>
+                <span id="groupLoadState">尚未加载群组列表</span>
+              </div>
+              <div class="search-input-wrap compact">
+                <span class="nav-ico" data-icon="search"></span>
+                <input id="groupSearchInput" type="search" placeholder="搜索群名称、ID 或 @username..." autocomplete="off" />
+              </div>
+            </div>
+            <div id="selectedGroupNames" class="selected-group-names"></div>
+            <div id="groupList" class="group-list">
+              <div class="empty-state">加载后可以直接勾选群组；如果 Telegram 未连接，请先确认 session 和 api_id/api_hash 配置。</div>
+            </div>
+          </section>
+        </section>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <!-- Global Glass Modal Backdrop for Config & Template Popups -->
+    <div id="glassModalBackdrop" class="glass-modal-backdrop hidden" aria-hidden="true"></div>
+
+    <!-- Appearance & Background Studio Modal -->
+    <div id="appearanceModal" class="glass-dialog-wrap hidden" role="dialog" aria-modal="true" aria-label="外观与背景">
+      <div class="glass-dialog-backdrop" data-close-appearance></div>
+      <div class="glass-dialog appearance-dialog">
+        <div class="glass-dialog-head">
+          <div class="glass-dialog-title">
+            <span class="dialog-ico" data-icon="palette"></span>
+            <div>
+              <h2>外观与背景</h2>
+              <p>自定义半透明毛玻璃、壁纸背景、动态氛围与鼠标微交互，自动同步保存到服务端</p>
+            </div>
+          </div>
+          <button type="button" class="icon-btn dialog-close-btn" data-close-appearance aria-label="关闭外观设置">✕</button>
+        </div>
+
+        <div class="glass-dialog-body appearance-body">
+          <div id="appearancePreviewBanner" class="appearance-banner">
+            <div class="appearance-banner-overlay">
+              <span id="appearanceBannerEyebrow" class="appearance-eyebrow">LIVE GLASS PREVIEW</span>
+              <strong id="appearanceBannerTitle">暖暮绯红</strong>
+              <small id="appearanceBannerDesc">半透明毛玻璃 · 极光动态背景 · 鼠标微视差</small>
+            </div>
+          </div>
+
+          <section class="appearance-block">
+            <div class="appearance-block-head">
+              <h3>自定义皮肤（兼容 Muvyo .mvskin）</h3>
+              <label class="mvskin-import-btn" for="mvskinFileInput">
+                <span class="nav-ico mini-ico" data-icon="upload"></span>
+                <span>导入 .mvskin 皮肤</span>
+                <input id="mvskinFileInput" type="file" accept=".mvskin,.zip,application/zip" hidden />
+              </label>
+            </div>
+            <div id="customSkinsGrid" class="custom-skins-grid"></div>
+          </section>
+
+          <section class="appearance-block">
+            <div class="appearance-block-head">
+              <h3>主题与点缀色</h3>
+              <span class="hint">即时预览，自动保存</span>
+            </div>
+            <div class="appearance-row-grid">
+              <div class="appearance-control-card">
+                <span class="control-label">明暗模式</span>
+                <div class="segmented-bar" id="appearanceThemeSwitch">
+                  <button type="button" class="seg-btn" data-app-theme="dark">深色</button>
+                  <button type="button" class="seg-btn" data-app-theme="light">浅色</button>
+                </div>
+              </div>
+              <div class="appearance-control-card">
+                <span class="control-label">界面密度</span>
+                <div class="segmented-bar" id="appearanceDensitySwitch">
+                  <button type="button" class="seg-btn" data-density-option="compact">紧凑</button>
+                  <button type="button" class="seg-btn" data-density-option="comfortable">标准</button>
+                  <button type="button" class="seg-btn" data-density-option="spacious">舒适</button>
+                </div>
+              </div>
+            </div>
+            <div class="accent-swatches" id="appearanceAccentSwatches" role="radiogroup" aria-label="强调色">
+              <button type="button" class="accent-chip" data-app-accent="crimson"><i style="--sw:#c06359"></i>暖暮绯红</button>
+              <button type="button" class="accent-chip" data-app-accent="indigo"><i style="--sw:#7b88d6"></i>暮夜靛蓝</button>
+              <button type="button" class="accent-chip" data-app-accent="amber"><i style="--sw:#cc944b"></i>暖金琥珀</button>
+              <button type="button" class="accent-chip" data-app-accent="sky"><i style="--sw:#5fa0cc"></i>雾凇冰蓝</button>
+              <button type="button" class="accent-chip" data-app-accent="violet"><i style="--sw:#a47bc9"></i>星云柔紫</button>
+              <button type="button" class="accent-chip" data-app-accent="emerald"><i style="--sw:#4c9f82"></i>沉静苔玉</button>
+            </div>
+          </section>
+
+          <section class="appearance-block">
+            <div class="appearance-block-head">
+              <h3>背景壁纸</h3>
+              <span class="hint">支持内置预设、本地高清图上传（最大 8 MB）或外部图片 URL</span>
+            </div>
+            <div id="wallpaperPresetGrid" class="wallpaper-preset-grid"></div>
+
+            <div class="wallpaper-custom-row">
+              <label class="wallpaper-upload-btn" for="wallpaperFileInput">
+                <span class="nav-ico mini-ico" data-icon="upload"></span>
+                <span>上传本地背景图</span>
+                <input id="wallpaperFileInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
+              </label>
+              <div class="wallpaper-url-wrap">
+                <input id="wallpaperUrlInput" type="url" placeholder="或粘贴背景图 URL（https://...）" />
+                <button id="applyWallpaperUrlBtn" type="button">应用链接</button>
+              </div>
+            </div>
+
+            <div id="uploadedWallpapersSection" class="uploaded-wallpapers-wrap hidden">
+              <div class="uploaded-wallpapers-head">
+                <span>已上传壁纸</span>
+                <small class="hint">点击即可切换，跨设备共享</small>
+              </div>
+              <div id="uploadedWallpapersGrid" class="uploaded-wallpapers-grid"></div>
+            </div>
+          </section>
+
+          <section class="appearance-block">
+            <div class="appearance-block-head">
+              <h3>半透明玻璃与动态交互</h3>
+              <span class="hint">可随时关闭动效以获得极致省电表现</span>
+            </div>
+            <div class="appearance-sliders">
+              <label class="slider-row">
+                <div class="slider-meta"><span>背景图可见度</span><b id="valWallpaperOpacity">68%</b></div>
+                <input id="rangeWallpaperOpacity" type="range" min="0" max="100" step="2" value="68" />
+              </label>
+              <label class="slider-row">
+                <div class="slider-meta"><span>玻璃卡片浓度</span><b id="valGlassOpacity">54%</b></div>
+                <input id="rangeGlassOpacity" type="range" min="24" max="90" step="2" value="54" />
+              </label>
+              <label class="slider-row">
+                <div class="slider-meta"><span>毛玻璃模糊度</span><b id="valGlassBlur">18px</b></div>
+                <input id="rangeGlassBlur" type="range" min="0" max="32" step="2" value="18" />
+              </label>
+            </div>
+
+            <div class="ambient-effects-grid" id="ambientEffectPicker">
+              <button type="button" class="effect-card" data-ambient-effect="aurora">
+                <strong>极光流动</strong>
+                <small>柔和渐变光晕缓慢流动</small>
+              </button>
+              <button type="button" class="effect-card" data-ambient-effect="stardust">
+                <strong>轻星尘</strong>
+                <small>微光粒子漂浮并回应鼠标</small>
+              </button>
+              <button type="button" class="effect-card" data-ambient-effect="mesh">
+                <strong>呼吸光网</strong>
+                <small>微距柔光波纹呼吸律动</small>
+              </button>
+              <button type="button" class="effect-card" data-ambient-effect="none">
+                <strong>静态纯净</strong>
+                <small>关闭持续动态渲染</small>
+              </button>
+            </div>
+
+            <div class="appearance-toggles">
+              <label class="inline-setting toggle-row">
+                <div><span>鼠标背景微视差</span><small>移动鼠标时背景轻柔跟随位移，营造空间层次</small></div>
+                <input id="toggleMouseParallax" type="checkbox" checked />
+              </label>
+              <label class="inline-setting toggle-row">
+                <div><span>卡片聚光灯高光</span><small>悬停玻璃卡片时呈现细腻光晕折射边缘</small></div>
+                <input id="toggleCardSpotlight" type="checkbox" checked />
+              </label>
+              <label class="inline-setting toggle-row">
+                <div><span>顶栏皮肤头像徽章</span><small>启用自定义皮肤时在顶栏最右侧展示圆形头像</small></div>
+                <input id="toggleShowSkinAvatar" type="checkbox" checked />
+              </label>
+            </div>
+          </section>
+        </div>
+
+        <div class="glass-dialog-foot">
+          <button id="resetAppearanceBtn" type="button" class="ghost-btn">恢复默认外观</button>
+          <button type="button" class="primary" data-close-appearance>完成</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Floating Unsaved Changes Bar -->
+    <div id="dirtySaveBar" class="dirty-save-bar hidden" role="status" aria-live="polite">
+      <div class="dirty-save-info">
+        <span class="dirty-dot" aria-hidden="true"></span>
+        <span>当前页面有未保存的更改</span>
+        <kbd class="kbd-hint">Ctrl S</kbd>
+      </div>
+      <div class="dirty-save-actions">
+        <button id="dirtyDiscardBtn" type="button" class="ghost-btn">放弃修改</button>
+        <button id="dirtySaveBtn" type="button" class="primary">立即保存</button>
+      </div>
+    </div>
+
+    <!-- Command Palette Modal -->
+    <div id="commandPalette" class="cmd-modal hidden" role="dialog" aria-modal="true" aria-label="快捷命令面板">
+      <div class="cmd-backdrop" data-close-cmd></div>
+      <div class="cmd-dialog">
+        <div class="cmd-input-row">
+          <span class="nav-ico" data-icon="search"></span>
+          <input id="cmdSearchInput" type="text" placeholder="搜索模块、页面或快捷操作..." autocomplete="off" spellcheck="false" />
+          <kbd class="kbd-hint">ESC</kbd>
+        </div>
+        <div id="cmdResults" class="cmd-results" role="listbox"></div>
+        <div class="cmd-footer">
+          <span><kbd>↑</kbd><kbd>↓</kbd> 选择</span>
+          <span><kbd>↵</kbd> 执行</span>
+          <span><kbd>ESC</kbd> 关闭</span>
+        </div>
+      </div>
+    </div>
 
     <div id="toastHost" class="toast-host" aria-live="polite" aria-atomic="true"></div>
-    <script src="/app.js"></script>
+    <script src="/app.js?v=20261124c"></script>
+    <script src="/ui_studio.js?v=20261124c"></script>
   </body>
 </html>

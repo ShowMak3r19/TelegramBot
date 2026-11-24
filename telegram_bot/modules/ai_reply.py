@@ -3,10 +3,12 @@ from __future__ import annotations
 import html
 import json
 import logging
+import math
+import re
 import time
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from telegram_bot.config import AIConfig, AIReplyConfig
 from telegram_bot.shared import telegram_media
@@ -17,7 +19,7 @@ from telegram_bot.shared.ai_responses import (
     collect_image_inputs_for_responses,
     collect_reasoning_summary,
     collect_response_text_and_sources,
-    extract_requested_image_indexes,
+    extract_requested_image_indexes,  # noqa: F401 - re-exported for tests
     extract_usage_counts,
 )
 from telegram_bot.shared.ai_messages import (
@@ -36,8 +38,10 @@ from telegram_bot.shared.ai_messages import (
 )
 from telegram_bot.shared.telegram_io import (
     TELEGRAM_SAFE_TEXT_LIMIT,
+    atomic_write_text,
     event_message as _event_message,
     get_reply_message as _get_reply_message,
+    is_edited_event as _is_edited_event,
     is_outgoing as _is_outgoing,
     message_text as _message_text,
     obj_get,
@@ -45,13 +49,25 @@ from telegram_bot.shared.telegram_io import (
     safe_edit_message,
     truncate_text,
 )
-from telegram_bot.shared.telegram_media import media_size_bytes, representative_frame_positions
+from telegram_bot.shared.telegram_media import media_size_bytes, representative_frame_positions  # noqa: F401 - re-exported for tests
 
 from .base import ModuleCard
 
 logger = logging.getLogger(__name__)
 
 MAX_CONTEXT_TEXT_CHARS = 8000
+_SENSITIVE_RAW_KEYS = {"phone", "access_hash", "file_reference", "auth_key"}
+_KNOWN_AI_SETTING_COMMANDS = {
+    "/ai_show",
+    "/ai_model",
+    "/ai_reasoning",
+    "/ai_verbosity",
+    "/ai_web",
+    "/ai_summary",
+    "/ai_detail",
+    "/ai_tokens",
+    "/ai_timeout",
+}
 
 try:
     from openai import AsyncOpenAI
@@ -66,6 +82,14 @@ class AIReplyModule:
         self.project_root = project_root
         self.usage_path = self._resolve_path("runtime/data/ai_usage.jsonl")
         self.settings_path = self._resolve_path(self.config.reply.settings_store)
+        self._programmatic_message_checker: Callable[[Any], bool] | None = None
+        self._load_ai_settings()
+        self._sync_card_config()
+
+    def set_programmatic_message_checker(self, checker: Callable[[Any], bool] | None) -> None:
+        self._programmatic_message_checker = checker
+
+    def reload_runtime_settings(self) -> None:
         self._load_ai_settings()
         self._sync_card_config()
 
@@ -80,6 +104,11 @@ class AIReplyModule:
             return HandlerResult.ignored(self.card.id)
         if not _is_outgoing(event):
             return HandlerResult.ignored(self.card.id)
+        if _is_edited_event(event):
+            return HandlerResult.ignored(self.card.id)
+        message = _event_message(event)
+        if self._programmatic_message_checker is not None and self._programmatic_message_checker(message):
+            return HandlerResult.ignored(self.card.id)
 
         if await self._handle_message_info_command(event):
             return HandlerResult.handled(self.card.id, "message info sent")
@@ -87,7 +116,6 @@ class AIReplyModule:
         if await self._handle_ai_setting_command(event):
             return HandlerResult.handled(self.card.id, "ai setting updated")
 
-        message = _event_message(event)
         text = _message_text(message or event)
         prompt = extract_ai_prompt(text, bool(getattr(message, "is_reply", False)), self.config.reply)
         if prompt is None:
@@ -102,18 +130,37 @@ class AIReplyModule:
 
     def update_config(self, values: dict[str, Any]) -> None:
         reply_values = values.get("reply")
+        should_save_runtime_settings = False
         if isinstance(reply_values, dict):
             self.config.reply = _reply_config_from_dict({**asdict(self.config.reply), **reply_values})
+            should_save_runtime_settings = any(
+                key in reply_values
+                for key in (
+                    "reasoning_effort",
+                    "reasoning_summary",
+                    "text_verbosity",
+                    "web_search",
+                    "image_detail",
+                    "message_info_enabled",
+                    "message_info_command_prefixes",
+                    "max_tokens",
+                    "timeout_seconds",
+                )
+            )
         provider_values = values.get("reply_provider")
         if isinstance(provider_values, dict):
             for key in ("name", "provider_type", "base_url", "model"):
                 if key in provider_values:
                     setattr(self.config.reply_provider, key, str(provider_values.get(key) or ""))
+                    if key == "model":
+                        should_save_runtime_settings = True
             if "enabled" in provider_values:
                 self.config.reply_provider.enabled = bool(provider_values["enabled"])
             if str(provider_values.get("api_key") or "").strip():
                 self.config.reply_provider.api_key = str(provider_values["api_key"]).strip()
         self.settings_path = self._resolve_path(self.config.reply.settings_store)
+        if should_save_runtime_settings and self.settings_path.exists():
+            self._save_ai_settings()
         self._sync_card_config()
 
     async def _handle_ai_chat(self, event: Any, prompt: str) -> None:
@@ -295,7 +342,9 @@ class AIReplyModule:
         if not provider.model:
             raise ValueError("AI 功能未配置 model，请在管理后台或 config.json 中配置。")
 
-        client = AsyncOpenAI(api_key=provider.api_key, base_url=provider.base_url.rstrip("/"), timeout=reply.timeout_seconds)
+        client_kwargs: dict[str, Any] = {"api_key": provider.api_key, "timeout": reply.timeout_seconds}
+        if provider.base_url.strip():
+            client_kwargs["base_url"] = provider.base_url.rstrip("/")
         input_items: list[dict[str, Any]] = []
         developer_prompt = build_developer_prompt(reply)
         if developer_prompt:
@@ -343,6 +392,7 @@ class AIReplyModule:
             reply.max_tokens,
         )
         started_at = time.monotonic()
+        client = AsyncOpenAI(**client_kwargs)
         try:
             response = await client.responses.create(**request_kwargs)
             self._record_ai_usage("ai_chat", "responses", provider.model, True, started_at, response)
@@ -363,11 +413,11 @@ class AIReplyModule:
         token_stats = build_token_stats(response)
         if status == "incomplete" and incomplete_reason:
             answer = (answer or "（模型未返回可显示文本）") + f"\n\n[输出未完成：{incomplete_reason}]"
-        final_html = format_markdown_for_telegram(answer or "（模型未返回可显示文本）")
+        final_html = format_markdown_for_telegram(truncate_text(answer or "（模型未返回可显示文本）", 2600))
         sources_html = build_sources_html(sources)
         if sources_html:
             final_html = f"{final_html}\n\n{sources_html}"
-        reasoning_html = format_markdown_for_telegram(reasoning_summary) if reasoning_summary else ""
+        reasoning_html = format_markdown_for_telegram(truncate_text(reasoning_summary, 700)) if reasoning_summary else ""
         powered_by = "Responses API"
         if sources_html:
             powered_by += " + web_search"
@@ -395,7 +445,6 @@ class AIReplyModule:
         client_kwargs: dict[str, Any] = {"api_key": provider.api_key, "timeout": reply.timeout_seconds}
         if provider.base_url.strip():
             client_kwargs["base_url"] = provider.base_url.rstrip("/")
-        client = AsyncOpenAI(**client_kwargs)
         request_kwargs: dict[str, Any] = {
             "model": provider.model,
             "messages": build_openai_chat_messages(
@@ -422,6 +471,7 @@ class AIReplyModule:
             reply.max_tokens,
         )
         started_at = time.monotonic()
+        client = AsyncOpenAI(**client_kwargs)
         try:
             response = await client.chat.completions.create(**request_kwargs)
             self._record_ai_usage("ai_chat", "chat_completions", provider.model, True, started_at, response)
@@ -441,11 +491,11 @@ class AIReplyModule:
         finish_reason = str(obj_get(choices[0] if choices else {}, "finish_reason", "") or "").strip().lower()
         if finish_reason in {"length", "max_tokens"}:
             answer = (answer or "（模型未返回可显示文本）") + "\n\n[输出未完成：max_tokens]"
-        final_html = format_markdown_for_telegram(answer or "（模型未返回可显示文本）")
+        final_html = format_markdown_for_telegram(truncate_text(answer or "（模型未返回可显示文本）", 2600))
         sources_html = build_sources_html(sources)
         if sources_html:
             final_html = f"{final_html}\n\n{sources_html}"
-        reasoning_html = format_markdown_for_telegram(reasoning_summary) if reasoning_summary else ""
+        reasoning_html = format_markdown_for_telegram(truncate_text(reasoning_summary, 700)) if reasoning_summary else ""
         powered_by = "Chat Completions API"
         if sources_html:
             powered_by += " + sources"
@@ -464,7 +514,6 @@ class AIReplyModule:
         if not provider.model:
             raise ValueError("AI 功能未配置 model，请在管理后台或 config.json 中配置。")
 
-        client = make_async_anthropic_client(provider.api_key, provider.base_url, reply.timeout_seconds)
         system_parts: list[str] = []
         developer_prompt = build_developer_prompt(reply)
         if developer_prompt:
@@ -510,6 +559,7 @@ class AIReplyModule:
             reply.max_tokens,
         )
         started_at = time.monotonic()
+        client = make_async_anthropic_client(provider.api_key, provider.base_url, reply.timeout_seconds)
         try:
             message = await anthropic_create_message(client, request_kwargs)
             self._record_ai_usage("ai_chat", "messages", provider.model, True, started_at, message)
@@ -524,11 +574,11 @@ class AIReplyModule:
         token_stats = build_token_stats(message)
         if obj_get(message, "stop_reason") == "max_tokens":
             answer = (answer or "（模型未返回可显示文本）") + "\n\n[输出未完成：max_tokens]"
-        final_html = format_markdown_for_telegram(answer or "（模型未返回可显示文本）")
+        final_html = format_markdown_for_telegram(truncate_text(answer or "（模型未返回可显示文本）", 2600))
         sources_html = build_sources_html(sources)
         if sources_html:
             final_html = f"{final_html}\n\n{sources_html}"
-        reasoning_html = format_markdown_for_telegram(reasoning_summary) if reasoning_summary else ""
+        reasoning_html = format_markdown_for_telegram(truncate_text(reasoning_summary, 700)) if reasoning_summary else ""
         powered_by = "Messages API"
         if sources_html:
             powered_by += " + web_search"
@@ -547,14 +597,16 @@ class AIReplyModule:
         text = _message_text(message or event).strip()
         if not text:
             return False
-        first_word, _, value = text.partition(" ")
+        parts = text.split(None, 1)
+        first_word = parts[0]
+        value = parts[1] if len(parts) > 1 else ""
         shortcuts = {
             "/model": "/ai_model",
             "/m": "/ai_model",
             "/chat_model": "/ai_model",
         }
         command = shortcuts.get(first_word, first_word)
-        if not command.startswith("/ai_"):
+        if command not in _KNOWN_AI_SETTING_COMMANDS:
             return False
 
         reply = self.config.reply
@@ -641,9 +693,12 @@ class AIReplyModule:
 
         if command == "/ai_timeout" and value.strip():
             try:
-                reply.timeout_seconds = max(5, float(value.strip()))
+                parsed_timeout = float(value.strip())
+                if not math.isfinite(parsed_timeout):
+                    raise ValueError("non-finite timeout")
+                reply.timeout_seconds = max(5.0, min(parsed_timeout, 600.0))
             except ValueError:
-                await safe_edit_message(message, "timeout_seconds 必须是数字")
+                await safe_edit_message(message, "timeout_seconds 必须是有限数字")
                 return True
             self._save_ai_settings()
             await safe_edit_message(message, format_ai_setting_message("timeout_seconds", reply.timeout_seconds), parse_mode="html")
@@ -706,6 +761,8 @@ class AIReplyModule:
         except (OSError, json.JSONDecodeError):
             logger.warning("Failed to load AI settings store: %s", self.settings_path)
             return
+        if not isinstance(data, dict):
+            return
         if data.get("model"):
             self.config.reply_provider.model = str(data["model"])
         reply = self.config.reply
@@ -723,10 +780,18 @@ class AIReplyModule:
             reply.message_info_enabled = bool(data["message_info_enabled"])
         if isinstance(data.get("message_info_command_prefixes"), list):
             reply.message_info_command_prefixes = [str(item).strip() for item in data["message_info_command_prefixes"] if str(item).strip()]
-        if data.get("max_tokens"):
-            reply.max_tokens = int(data["max_tokens"])
-        if data.get("timeout_seconds"):
-            reply.timeout_seconds = float(data["timeout_seconds"])
+        if data.get("max_tokens") is not None:
+            try:
+                reply.max_tokens = max(256, min(int(data["max_tokens"]), 128000))
+            except (TypeError, ValueError):
+                pass
+        if data.get("timeout_seconds") is not None:
+            try:
+                parsed = float(data["timeout_seconds"])
+                if math.isfinite(parsed):
+                    reply.timeout_seconds = max(5.0, min(parsed, 600.0))
+            except (TypeError, ValueError):
+                pass
 
     def _save_ai_settings(self) -> None:
         payload = {
@@ -741,10 +806,7 @@ class AIReplyModule:
             "max_tokens": self.config.reply.max_tokens,
             "timeout_seconds": self.config.reply.timeout_seconds,
         }
-        self.settings_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.settings_path.with_suffix(self.settings_path.suffix + ".tmp")
-        tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(self.settings_path)
+        atomic_write_text(self.settings_path, json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         self._sync_card_config()
 
     def _sync_card_config(self) -> None:
@@ -765,9 +827,18 @@ class AIReplyModule:
 
 
 def strip_first_wake_word(text: str, wake_words: list[str]) -> str | None:
-    for wake_word in sorted((word for word in wake_words if word), key=len, reverse=True):
-        if wake_word in text:
-            return text.replace(wake_word, "", 1).strip()
+    stripped = (text or "").strip()
+    if not stripped or stripped[0] in {"/", ".", ","}:
+        return None
+    for wake_word in sorted((word.strip() for word in wake_words if word.strip()), key=len, reverse=True):
+        escaped = re.escape(wake_word)
+        if wake_word[-1].isascii() and wake_word[-1].isalnum():
+            pattern = rf"(?:^|(?<=\s)){escaped}(?=$|\s|[,，:：!?！？])"
+        else:
+            pattern = rf"(?:^|(?<=\s)){escaped}(?=$|\s|[,，:：!?！？]|[^\x00-\x7f])"
+        match = re.search(pattern, stripped)
+        if match:
+            return (stripped[: match.start()] + stripped[match.end() :]).strip()
     return None
 
 
@@ -945,6 +1016,8 @@ def make_json_safe(value: Any, max_depth: int = 3, max_string: int = 600, max_it
     if isinstance(value, dict):
         items: dict[str, Any] = {}
         for index, (key, item) in enumerate(value.items()):
+            if str(key).lower() in _SENSITIVE_RAW_KEYS:
+                continue
             if index >= max_items:
                 items["..."] = f"{len(value) - max_items} more"
                 break
@@ -1150,16 +1223,34 @@ def _media_file_name(message: Any) -> str:
 
 
 def _reply_config_from_dict(data: dict[str, Any]) -> AIReplyConfig:
+    defaults = AIReplyConfig()
+    raw_ctx = data.get("context_limit")
+    context_limit = defaults.context_limit if raw_ctx is None or raw_ctx == "" else max(0, int(raw_ctx))
+    raw_timeout = data.get("timeout_seconds")
+    try:
+        parsed_timeout = defaults.timeout_seconds if raw_timeout is None or raw_timeout == "" else float(raw_timeout)
+        timeout_seconds = max(5.0, min(parsed_timeout, 600.0)) if math.isfinite(parsed_timeout) else defaults.timeout_seconds
+    except (TypeError, ValueError):
+        timeout_seconds = defaults.timeout_seconds
+    raw_tokens = data.get("max_tokens")
+    max_tokens = defaults.max_tokens if raw_tokens is None or raw_tokens == "" else max(256, min(int(raw_tokens), 128000))
+    raw_temp = data.get("temperature")
+    try:
+        parsed_temp = defaults.temperature if raw_temp is None or raw_temp == "" else float(raw_temp)
+        temperature = max(0.0, min(parsed_temp, 2.0)) if math.isfinite(parsed_temp) else defaults.temperature
+    except (TypeError, ValueError):
+        temperature = defaults.temperature
+    system_prompt = defaults.system_prompt if data.get("system_prompt") is None else str(data.get("system_prompt"))
     return AIReplyConfig(
-        system_prompt=str(data.get("system_prompt") or AIReplyConfig.system_prompt),
+        system_prompt=system_prompt,
         owner_user_ids=[int(item) for item in data.get("owner_user_ids", []) if str(item).strip()],
         command_prefixes=_clean_list(data.get("command_prefixes")),
         wake_words=_clean_list(data.get("wake_words")),
         reply_triggers=_clean_list(data.get("reply_triggers")),
-        context_limit=int(data.get("context_limit") or 6),
-        timeout_seconds=float(data.get("timeout_seconds") or 180.0),
-        max_tokens=int(data.get("max_tokens") or 25000),
-        temperature=float(data.get("temperature") or 0.7),
+        context_limit=context_limit,
+        timeout_seconds=timeout_seconds,
+        max_tokens=max_tokens,
+        temperature=temperature,
         reasoning_effort=str(data.get("reasoning_effort") or "none"),
         reasoning_summary=bool(data.get("reasoning_summary", True)),
         text_verbosity=str(data.get("text_verbosity") or "medium"),

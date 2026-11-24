@@ -1,5 +1,5 @@
 [Unit]
-Description=TelegramBot management and Telegram service
+Description=Telebot management and Telegram service
 Wants=network-online.target
 After=network-online.target
 

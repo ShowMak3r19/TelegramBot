@@ -4,6 +4,7 @@ import asyncio
 import html
 import logging
 import re
+import secrets
 import shutil
 import subprocess
 from dataclasses import asdict
@@ -11,7 +12,13 @@ from pathlib import Path
 from typing import Any
 
 from telegram_bot.config import GifConfig
-from telegram_bot.shared.telegram_io import safe_delete_message, safe_edit_message
+from telegram_bot.shared.telegram_io import (
+    is_edited_event,
+    prune_dir_files,
+    safe_delete_message,
+    safe_edit_message,
+    safe_filename_component,
+)
 from telegram_bot.shared import telegram_media
 from telegram_bot.shared.contracts import HandlerResult
 
@@ -19,6 +26,7 @@ from .base import ModuleCard
 
 logger = logging.getLogger(__name__)
 
+MAX_GIF_SOURCE_BYTES = 100 * 1024 * 1024
 END_MARKERS = {"最后", "最后一秒", "结尾", "末尾", "结束"}
 HEAD_MARKERS = {"开头", "头", "头部", "开始", "一开始", "最开始", "从头", "从头开始"}
 
@@ -41,7 +49,7 @@ class GifModule:
         self.card.status = "stopped"
 
     async def handle_message(self, event: Any) -> HandlerResult:
-        if not _is_outgoing(event):
+        if is_edited_event(event) or not _is_outgoing(event):
             return HandlerResult.ignored(self.card.id)
 
         message = _event_message(event)
@@ -76,11 +84,33 @@ class GifModule:
             return
 
         display_prompt = prompt or "引用视频转动图"
+        media_size = telegram_media.media_size_bytes(replied)
+        if media_size > MAX_GIF_SOURCE_BYTES:
+            await safe_edit_message(
+                message,
+                format_gif_status_message(
+                    display_prompt,
+                    f"引用媒体过大（{media_size / 1024 / 1024:.1f}MB），超过 {MAX_GIF_SOURCE_BYTES // (1024 * 1024)}MB 限制。",
+                    self.config,
+                ),
+                parse_mode="html",
+            )
+            return
+
+        try:
+            start_seconds, end_seconds = parse_gif_time_range(prompt) or (0.0, None)
+        except ValueError as exc:
+            await safe_edit_message(message, format_gif_status_message(display_prompt, str(exc), self.config), parse_mode="html")
+            return
+
         await safe_edit_message(message, format_gif_status_message(display_prompt, "已触发，正在下载引用媒体……", self.config), parse_mode="html")
 
         chat_id = getattr(message, "chat_id", getattr(event, "chat_id", "chat"))
         message_id = getattr(message, "id", "message")
-        output_path = self.output_dir / f"tg_gif_{chat_id}_{message_id}.gif"
+        output_path = self.output_dir / (
+            f"tg_gif_{safe_filename_component(str(chat_id), 'chat')}_"
+            f"{safe_filename_component(str(message_id), 'msg')}_{secrets.token_hex(4)}.gif"
+        )
         downloaded_path: Path | None = None
         try:
             self.tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -89,7 +119,6 @@ class GifModule:
                 await safe_edit_message(message, format_gif_status_message(display_prompt, "引用媒体下载失败。", self.config), parse_mode="html")
                 return
             downloaded_path = Path(downloaded)
-            start_seconds, end_seconds = parse_gif_time_range(prompt) or (0.0, None)
             if start_seconds or end_seconds is not None:
                 await safe_edit_message(
                     message,
@@ -100,6 +129,7 @@ class GifModule:
                 await safe_edit_message(message, format_gif_status_message(display_prompt, "正在直接转换为 GIF……", self.config), parse_mode="html")
 
             gif_path = await asyncio.to_thread(convert_media_to_gif, downloaded_path, output_path, self.config, start_seconds, end_seconds)
+            prune_dir_files(self.output_dir, max_files=50, keep_names={gif_path.name})
             await safe_edit_message(message, format_gif_status_message(display_prompt, "GIF 已生成，正在发送……", self.config), parse_mode="html")
             await event.client.send_file(
                 getattr(message, "chat_id", getattr(event, "chat_id", None)),
@@ -112,7 +142,9 @@ class GifModule:
             await safe_delete_message(message, "gif_cleanup")
         except Exception as exc:
             logger.exception("Video to GIF failed: %s", exc)
-            await safe_edit_message(message, format_gif_status_message(display_prompt, f"GIF 转换失败：{exc}", self.config), parse_mode="html")
+            user_reason = str(exc) if isinstance(exc, ValueError) else "媒体转码或发送失败，请查看后台日志。"
+            await safe_edit_message(message, format_gif_status_message(display_prompt, f"GIF 转换失败：{user_reason}", self.config), parse_mode="html")
+            raise
         finally:
             _unlink_quietly(downloaded_path)
 
@@ -142,15 +174,12 @@ def extract_command_prompt(text: str, prefixes: list[str]) -> str | None:
     if not stripped:
         return None
     lowered = stripped.lower()
-    for prefix in prefixes:
-        prefix = prefix.strip()
-        if not prefix:
-            continue
+    for prefix in sorted((item.strip() for item in prefixes if item.strip()), key=len, reverse=True):
         if lowered == prefix.lower():
             return ""
         if lowered.startswith(prefix.lower()):
             rest = stripped[len(prefix) :]
-            if not rest or rest[0].isspace() or prefix.startswith("/"):
+            if not rest or rest[0].isspace():
                 return rest.strip()
     return None
 
@@ -169,7 +198,7 @@ def parse_gif_time_range(text: str) -> tuple[float, float | None] | None:
         if start in {None, "invalid"} or end == "invalid":
             continue
         if end is not None and end <= start:
-            return None
+            raise ValueError("结束时间必须大于开始时间。")
         return max(0.0, float(start)), end
 
     start_match = re.search(r"(?:从|由|自)?(?P<start>.+?)(?:开始|起)(?:到(?:最后|结尾|末尾|结束))?$", compact)

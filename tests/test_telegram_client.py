@@ -95,3 +95,48 @@ def test_telegram_adapter_iterates_history_oldest_first_after_checkpoint(tmp_pat
     assert asyncio.run(collect()) == [11, 12]
     assert captured["entity"] == -100123
     assert captured["kwargs"] == {"min_id": 10, "reverse": True}
+
+
+def test_watchdog_reconnects_dropped_client_and_notifies_listeners(tmp_path: Path) -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.up = False
+            self.connect_calls = 0
+
+        def is_connected(self) -> bool:
+            return self.up
+
+        async def connect(self) -> None:
+            self.connect_calls += 1
+            if self.connect_calls >= 2:  # 第一次重连失败，第二次成功
+                self.up = True
+            else:
+                raise ConnectionError("network down")
+
+        async def disconnect(self) -> None:
+            self.up = False
+
+    async def scenario() -> None:
+        adapter = TelegramAdapter(TelegramConfig(), tmp_path, lambda event: asyncio.sleep(0))
+        adapter.client = FakeClient()
+        adapter.connected = True
+        adapter.watchdog_interval = 0.01
+        calls: list[str] = []
+        adapter.add_reconnect_listener(lambda: calls.append("sync"))
+
+        async def async_listener() -> None:
+            calls.append("async")
+
+        adapter.add_reconnect_listener(async_listener)
+        adapter._watchdog_task = asyncio.create_task(adapter._watchdog())
+        for _ in range(100):
+            await asyncio.sleep(0.01)
+            if calls:
+                break
+        assert adapter.connected is True
+        assert adapter.client.connect_calls == 2
+        assert calls == ["sync", "async"]
+        await adapter.stop()
+        assert adapter._watchdog_task is None
+
+    asyncio.run(scenario())

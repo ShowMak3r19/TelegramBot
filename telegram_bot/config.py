@@ -2,9 +2,19 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass, field
+import re
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
+
+from telegram_bot.shared.telegram_io import atomic_write_text
+
+
+def _filter_dataclass_kwargs(cls: type[Any], data: Any) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        return {}
+    allowed = {item.name for item in fields(cls)}
+    return {key: value for key, value in data.items() if key in allowed}
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -77,6 +87,7 @@ class ModuleSwitchConfig:
     quote: bool = False
     chat_games: bool = False
     magnet_import: bool = False
+    rex_widget_sync: bool = False
 
 
 @dataclass
@@ -222,10 +233,54 @@ class MagnetImportConfig:
     update_existing: bool = False
     skip_duplicates: bool = True
     reply_text: str = "已自动导入，谢谢老大"
+    # 手动导入：在 watch_chats 里回复 CSV 文件发送该指令（仅本账号）
+    import_command_prefixes: list[str] = field(default_factory=lambda: ["/import"])
     download_dir: str = "runtime/tmp/magnet_import"
     download_retries: int = 5
     import_timeout_seconds: float = 1800.0
     state_store: str = "runtime/data/magnet_import_state.json"
+    # 频道来源：解析频道帖子里的番号和 ed2k/magnet，实时导入 + 启动补漏 + 手动全量
+    channel_enabled: bool = False
+    channel_chat: str = ""
+    channel_url_prefix: str = ""
+    channel_source_site: str = ""
+    channel_forum_id: str = ""
+    channel_forum_type: str = ""
+    channel_batch_size: int = 500
+    channel_enrich_images: bool = True
+    # 每周增量导出频道记录为 CSV 发到群；weekday 0=周一 … 4=周五，时间按北京时间
+    channel_export_enabled: bool = False
+    channel_export_chat: str = ""
+    channel_export_weekday: int = 4
+    channel_export_time: str = "12:00"
+    channel_export_source_site: str = ""
+    # AVDB 资源包：定时检查 GitHub release，下载加密 ZIP，用转换脚本转 CSV 后导入
+    avdb_enabled: bool = False
+    avdb_repo: str = ""
+    avdb_asset_pattern: str = r"^.*\.zip$"
+    avdb_interval_hours: int = 4
+    avdb_source_site: str = ""
+    avdb_converter_script: str = "scripts/avdb/resource_to_csv.sh"
+
+
+@dataclass
+class RexWidgetSyncConfig:
+    # 监听「REX 模块分享」频道，把 .js 模块新增/更新到 Rex Widget Hub 的合集
+    channel_chat: str = ""
+    hub_base_url: str = ""
+    hub_password: str = ""
+    collection_slug: str = ""
+    group_id: str = ""
+    file_name_pattern: str = r"\.js$"
+    # (FW) 是 Forward 版本，Rex Hub 不需要
+    exclude_name_pattern: str = r"[\(（]\s*(?:FW|Forward)\s*[\)）]"
+    follow_links: bool = True
+    # 不同步的模块 key（文件名去版本后的小写名），用于丢弃已被其他模块取代的旧线
+    ignore_keys: list[str] = field(default_factory=list)
+    lock_title: bool = True
+    max_file_size_mb: int = 25
+    request_timeout_seconds: float = 120.0
+    state_store: str = "runtime/data/rex_widget_sync_state.json"
 
 
 @dataclass
@@ -273,16 +328,6 @@ class QuoteConfig:
     timeout_seconds: float = 60.0
     sticker_set_short_name: str = ""
     tmp_dir: str = "runtime/tmp"
-
-
-
-
-
-
-
-
-
-
 
 
 @dataclass
@@ -440,7 +485,7 @@ class AIConfig:
 
 @dataclass
 class AppConfig:
-    project_name: str = "TelegramBot"
+    project_name: str = "Telebot"
     version: str = "0.1.0"
     admin: AdminConfig = field(default_factory=AdminConfig)
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
@@ -459,6 +504,7 @@ class AppConfig:
     quote: QuoteConfig = field(default_factory=QuoteConfig)
     chat_games: ChatGamesConfig = field(default_factory=ChatGamesConfig)
     magnet_import: MagnetImportConfig = field(default_factory=MagnetImportConfig)
+    rex_widget_sync: RexWidgetSyncConfig = field(default_factory=RexWidgetSyncConfig)
     ai: AIConfig = field(default_factory=AIConfig)
 
     @classmethod
@@ -491,19 +537,19 @@ class AppConfig:
         return cls(
             project_name=data.get("project_name", cls.project_name),
             version=data.get("version", cls.version),
-            admin=AdminConfig(**data.get("admin", {})),
-            telegram=TelegramConfig(**data.get("telegram", {})),
-            logs=LogConfig(**data.get("logs", {})),
-            runtime=RuntimeConfig(**data.get("runtime", {})),
+            admin=AdminConfig(**_filter_dataclass_kwargs(AdminConfig, data.get("admin", {}))),
+            telegram=TelegramConfig(**_filter_dataclass_kwargs(TelegramConfig, data.get("telegram", {}))),
+            logs=LogConfig(**_filter_dataclass_kwargs(LogConfig, data.get("logs", {}))),
+            runtime=RuntimeConfig(**_filter_dataclass_kwargs(RuntimeConfig, data.get("runtime", {}))),
             chat_history=chat_history_config_from_dict(data.get("chat_history", {})),
-            modules=ModuleSwitchConfig(**data.get("modules", {})),
+            modules=ModuleSwitchConfig(**_filter_dataclass_kwargs(ModuleSwitchConfig, data.get("modules", {}))),
             red_packet=RedPacketConfig(
                 templates=[
-                    RedPacketTemplateConfig(**template)
+                    RedPacketTemplateConfig(**_filter_dataclass_kwargs(RedPacketTemplateConfig, template))
                     for template in data.get("red_packet", {}).get("templates", [])
-                    if isinstance(template, dict)
+                    if isinstance(template, dict) and template.get("id") is not None
                 ],
-                send_delay_ms=int(data.get("red_packet", {}).get("send_delay_ms") or 0),
+                send_delay_ms=max(0, _clamped_int(data.get("red_packet", {}).get("send_delay_ms"), 0, 0, 60_000)),
                 pre_click_messages=_clean_string_list(
                     data.get("red_packet", {}).get("pre_click_messages")
                 ),
@@ -512,11 +558,14 @@ class AppConfig:
             ai_decrypt=_ai_decrypt_config_from_dict(data.get("ai_decrypt", {})),
             checkin=CheckinConfig(
                 tasks=[
-                    CheckinTaskConfig(**task)
+                    CheckinTaskConfig(**_filter_dataclass_kwargs(CheckinTaskConfig, task))
                     for task in data.get("checkin", {}).get("tasks", [])
-                    if isinstance(task, dict)
+                    if isinstance(task, dict) and task.get("id") is not None
                 ],
-                poll_interval_seconds=float(data.get("checkin", {}).get("poll_interval_seconds") or 10.0),
+                poll_interval_seconds=max(
+                    1.0,
+                    min(_float_or_default(data.get("checkin", {}).get("poll_interval_seconds"), 10.0), 30.0),
+                ),
                 state_store=str(data.get("checkin", {}).get("state_store") or "runtime/data/checkin_state.json"),
             ),
             auto_forward=_auto_forward_config_from_dict(data.get("auto_forward", {})),
@@ -525,18 +574,23 @@ class AppConfig:
             quote=_quote_config_from_dict(data.get("quote", {})),
             chat_games=_chat_games_config_from_dict(data.get("chat_games", {})),
             magnet_import=magnet_import_config_from_dict(data.get("magnet_import", {})),
-            gif=GifConfig(**data.get("gif", {})),
+            rex_widget_sync=rex_widget_sync_config_from_dict(data.get("rex_widget_sync", {})),
+            gif=GifConfig(**_filter_dataclass_kwargs(GifConfig, data.get("gif", {}))),
             ai=AIConfig(
-                reply_provider=AIProviderConfig(**data.get("ai", {}).get("reply_provider", {})),
-                image_provider=AIProviderConfig(**data.get("ai", {}).get("image_provider", {})),
-                reply=AIReplyConfig(**data.get("ai", {}).get("reply", {})),
-                image=AIImageConfig(**data.get("ai", {}).get("image", {})),
+                reply_provider=AIProviderConfig(
+                    **_filter_dataclass_kwargs(AIProviderConfig, data.get("ai", {}).get("reply_provider", {}))
+                ),
+                image_provider=AIProviderConfig(
+                    **_filter_dataclass_kwargs(AIProviderConfig, data.get("ai", {}).get("image_provider", {}))
+                ),
+                reply=AIReplyConfig(**_filter_dataclass_kwargs(AIReplyConfig, data.get("ai", {}).get("reply", {}))),
+                image=AIImageConfig(**_filter_dataclass_kwargs(AIImageConfig, data.get("ai", {}).get("image", {}))),
             ),
         )
 
     def save(self, path: Path) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
+        atomic_write_text(
+            path,
             json.dumps(asdict(self), indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
@@ -554,30 +608,45 @@ class AppConfig:
             data["admin"]["password"] = _mask_secret(data["admin"]["password"])
         if data["magnet_import"].get("api_password"):
             data["magnet_import"]["api_password"] = _mask_secret(data["magnet_import"]["api_password"])
+        if data["rex_widget_sync"].get("hub_password"):
+            data["rex_widget_sync"]["hub_password"] = _mask_secret(data["rex_widget_sync"]["hub_password"])
         return data
 
 
 def _apply_env_overrides(config: dict[str, Any]) -> None:
     env_map = {
-        "TGBOT_ADMIN_HOST": ("admin", "host"),
-        "TGBOT_ADMIN_PORT": ("admin", "port"),
-        "TGBOT_ADMIN_USERNAME": ("admin", "username"),
-        "TGBOT_ADMIN_PASSWORD": ("admin", "password"),
-        "TGBOT_TELEGRAM_API_ID": ("telegram", "api_id"),
-        "TGBOT_TELEGRAM_API_HASH": ("telegram", "api_hash"),
-        "TGBOT_TELEGRAM_BOT_TOKEN": ("telegram", "bot_token"),
-        "TGBOT_TELEGRAM_ENABLED": ("telegram", "enabled"),
-        "TGBOT_LOG_LEVEL": ("logs", "level"),
+        "TGBOT_ADMIN_HOST": ("admin", "host", "str"),
+        "TGBOT_ADMIN_PORT": ("admin", "port", "int"),
+        "TGBOT_ADMIN_USERNAME": ("admin", "username", "str"),
+        "TGBOT_ADMIN_PASSWORD": ("admin", "password", "str"),
+        "TGBOT_TELEGRAM_API_ID": ("telegram", "api_id", "int"),
+        "TGBOT_TELEGRAM_API_HASH": ("telegram", "api_hash", "str"),
+        "TGBOT_TELEGRAM_BOT_TOKEN": ("telegram", "bot_token", "str"),
+        "TGBOT_TELEGRAM_ENABLED": ("telegram", "enabled", "bool"),
+        "TGBOT_LOG_LEVEL": ("logs", "level", "str"),
     }
-    for env_name, path in env_map.items():
+    for env_name, (section, key, kind) in env_map.items():
         raw = os.getenv(env_name)
         if raw is None:
             continue
-        section, key = path
-        config[section][key] = _coerce_env_value(raw)
+        config[section][key] = _coerce_env_value(raw, kind)
 
 
-def _coerce_env_value(value: str) -> Any:
+def _coerce_env_value(value: str, kind: str = "auto") -> Any:
+    if kind == "str":
+        return value
+    if kind == "bool":
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes", "on"}:
+            return True
+        if lowered in {"false", "0", "no", "off"}:
+            return False
+        return bool(value.strip())
+    if kind == "int":
+        try:
+            return int(value.strip())
+        except ValueError:
+            return value
     lowered = value.lower()
     if lowered in {"true", "1", "yes", "on"}:
         return True
@@ -736,6 +805,55 @@ def _auto_forward_config_from_dict(data: Any) -> AutoForwardConfig:
     )
 
 
+def _clock(value: Any, default: str) -> str:
+    match = re.fullmatch(r"\s*(\d{1,2}):(\d{2})\s*", str(value or ""))
+    if not match or int(match.group(1)) > 23 or int(match.group(2)) > 59:
+        return default
+    return f"{int(match.group(1)):02d}:{match.group(2)}"
+
+
+def rex_widget_sync_config_from_dict(data: Any) -> RexWidgetSyncConfig:
+    defaults = RexWidgetSyncConfig()
+    if not isinstance(data, dict):
+        return defaults
+
+    def _text(key: str) -> str:
+        value = data.get(key, getattr(defaults, key))
+        return str(value if value is not None else "").strip()
+
+    def _pattern(key: str) -> str:
+        value = _text(key)
+        try:
+            re.compile(value)
+        except re.error:
+            return getattr(defaults, key)
+        return value
+
+    try:
+        size = int(data.get("max_file_size_mb", defaults.max_file_size_mb))
+    except (TypeError, ValueError):
+        size = defaults.max_file_size_mb
+    try:
+        timeout = float(data.get("request_timeout_seconds", defaults.request_timeout_seconds))
+    except (TypeError, ValueError):
+        timeout = defaults.request_timeout_seconds
+    return RexWidgetSyncConfig(
+        channel_chat=_text("channel_chat"),
+        hub_base_url=(_text("hub_base_url") or defaults.hub_base_url).rstrip("/"),
+        hub_password=str(data.get("hub_password", defaults.hub_password) or ""),
+        collection_slug=_text("collection_slug") or defaults.collection_slug,
+        group_id=_text("group_id"),
+        file_name_pattern=_pattern("file_name_pattern") or defaults.file_name_pattern,
+        exclude_name_pattern=_pattern("exclude_name_pattern"),
+        follow_links=bool(data.get("follow_links", defaults.follow_links)),
+        ignore_keys=[item.lower() for item in _clean_string_list(data.get("ignore_keys", []))],
+        lock_title=bool(data.get("lock_title", defaults.lock_title)),
+        max_file_size_mb=max(1, min(25, size)),
+        request_timeout_seconds=max(10.0, min(600.0, timeout)),
+        state_store=_text("state_store") or defaults.state_store,
+    )
+
+
 def magnet_import_config_from_dict(data: Any) -> MagnetImportConfig:
     defaults = MagnetImportConfig()
     if not isinstance(data, dict):
@@ -766,11 +884,33 @@ def magnet_import_config_from_dict(data: Any) -> MagnetImportConfig:
         api_password=str(data.get("api_password", defaults.api_password) or ""),
         update_existing=bool(data.get("update_existing", defaults.update_existing)),
         skip_duplicates=bool(data.get("skip_duplicates", defaults.skip_duplicates)),
-        reply_text=str(data.get("reply_text") or defaults.reply_text),
+        reply_text=str(defaults.reply_text if data.get("reply_text") is None else data.get("reply_text")),
+        import_command_prefixes=_clean_string_list(data.get("import_command_prefixes")) or list(defaults.import_command_prefixes),
         download_dir=str(data.get("download_dir") or defaults.download_dir).strip(),
         download_retries=_int("download_retries", 1, 20),
         import_timeout_seconds=max(30.0, min(7200.0, timeout)),
         state_store=str(data.get("state_store") or defaults.state_store).strip(),
+        channel_enabled=bool(data.get("channel_enabled", defaults.channel_enabled)),
+        channel_chat=str(data.get("channel_chat") or defaults.channel_chat).strip(),
+        channel_url_prefix=str(data.get("channel_url_prefix") or defaults.channel_url_prefix).strip().rstrip("/"),
+        channel_source_site=str(data.get("channel_source_site") or defaults.channel_source_site).strip()[:50],
+        channel_forum_id=str(data.get("channel_forum_id") or defaults.channel_forum_id).strip()[:20],
+        channel_forum_type=str(data.get("channel_forum_type") or defaults.channel_forum_type).strip()[:20],
+        channel_batch_size=_int("channel_batch_size", 10, 5000),
+        channel_enrich_images=bool(data.get("channel_enrich_images", defaults.channel_enrich_images)),
+        channel_export_enabled=bool(data.get("channel_export_enabled", defaults.channel_export_enabled)),
+        channel_export_chat=str(data.get("channel_export_chat") or defaults.channel_export_chat).strip(),
+        channel_export_weekday=_int("channel_export_weekday", 0, 6),
+        channel_export_time=_clock(data.get("channel_export_time"), defaults.channel_export_time),
+        channel_export_source_site=str(
+            data.get("channel_export_source_site") or defaults.channel_export_source_site
+        ).strip()[:50],
+        avdb_enabled=bool(data.get("avdb_enabled", defaults.avdb_enabled)),
+        avdb_repo=str(data.get("avdb_repo") or defaults.avdb_repo).strip().strip("/"),
+        avdb_asset_pattern=str(data.get("avdb_asset_pattern") or defaults.avdb_asset_pattern).strip(),
+        avdb_interval_hours=_int("avdb_interval_hours", 1, 168),
+        avdb_source_site=str(data.get("avdb_source_site") or defaults.avdb_source_site).strip()[:50],
+        avdb_converter_script=str(data.get("avdb_converter_script") or defaults.avdb_converter_script).strip(),
     )
 
 
@@ -848,10 +988,10 @@ def _lucky_word_config_from_dict(data: Any) -> LuckyWordConfig:
         enabled=bool(data.get("enabled", defaults.enabled)),
         words=_list_or_default(data.get("words"), defaults.words),
         reward_text=str(data.get("reward_text") or defaults.reward_text).strip() or defaults.reward_text,
-        daily_limit_per_chat=max(0, min(int(data.get("daily_limit_per_chat") or defaults.daily_limit_per_chat), 50)),
-        per_user_daily_limit=max(0, min(int(data.get("per_user_daily_limit") or defaults.per_user_daily_limit), 20)),
+        daily_limit_per_chat=_clamped_int(data.get("daily_limit_per_chat"), defaults.daily_limit_per_chat, 0, 50),
+        per_user_daily_limit=_clamped_int(data.get("per_user_daily_limit"), defaults.per_user_daily_limit, 0, 20),
         ignore_command_prefixes=_list_or_default(data.get("ignore_command_prefixes"), defaults.ignore_command_prefixes),
-        min_message_length=max(1, min(int(data.get("min_message_length") or defaults.min_message_length), 80)),
+        min_message_length=_clamped_int(data.get("min_message_length"), defaults.min_message_length, 1, 80),
     )
 
 
@@ -926,20 +1066,6 @@ def _winner_policy(value: Any, default: str) -> str:
     return text if text in {"first", "random"} else default
 
 
-
-
-
-
-
-
-
-
-def _speech_segments_or_default(value: Any, default: list[str]) -> list[str]:
-    if not isinstance(value, list):
-        return list(default)
-    return [str(item).strip() for item in value if str(item).strip()]
-
-
 def _float_or_default(value: Any, default: float) -> float:
     try:
         return float(value)
@@ -953,16 +1079,6 @@ def _clamped_int(value: Any, default: int, minimum: int, maximum: int) -> int:
     except (TypeError, ValueError):
         parsed = int(default)
     return max(minimum, min(parsed, maximum))
-
-
-def _non_negative(value: Any, default: float) -> float:
-    """解析非负秒数；缺失/非法回落默认值，允许 0（表示不自动删除）。"""
-    if value is None:
-        return float(default)
-    try:
-        return max(0.0, float(value))
-    except (TypeError, ValueError):
-        return float(default)
 
 
 def _list_or_default(value: Any, default: list[str]) -> list[str]:

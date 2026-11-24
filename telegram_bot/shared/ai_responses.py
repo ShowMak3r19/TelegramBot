@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import html
 import logging
@@ -100,7 +101,7 @@ async def collect_image_inputs_for_responses(
             continue
         if len(media) > MAX_MEDIA_BYTES:
             return image_inputs, "TOO_LARGE"
-        image_url, error = media_bytes_to_responses_image_url(media, target)
+        image_url, error = await asyncio.to_thread(media_bytes_to_responses_image_url, media, target)
         if error:
             media_errors.append(f"{label}:{error}")
             logger.info("Skipped unsupported AI media input label=%s error=%s", label, error)
@@ -122,7 +123,7 @@ async def collect_motion_media_frame_inputs(target: Any, label: str, max_frames:
             if not downloaded:
                 return [], "DOWNLOAD_EMPTY"
             downloaded_path = Path(downloaded)
-            frames = extract_motion_media_frames_as_jpegs(downloaded_path, max_frames)
+            frames = await asyncio.to_thread(extract_motion_media_frames_as_jpegs, downloaded_path, max_frames)
             if not frames:
                 return [], "NO_FRAMES"
             return [

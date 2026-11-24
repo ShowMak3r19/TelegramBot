@@ -20,6 +20,7 @@ from .gif import GifModule
 from .magnet_import import MagnetImportModule
 from .red_packet import RedPacketModule
 from .quote import QuoteModule
+from .rex_widget_sync import RexWidgetSyncModule
 from .send_red_packet import SendRedPacketModule
 from .user_profile import UserProfileModule
 from .word_cloud import WordCloudModule
@@ -60,7 +61,12 @@ class ModuleRegistry:
         for module in self.all():
             if not module.card.enabled:
                 continue
-            result = await module.handle_message(message)
+            try:
+                result = await module.handle_message(message)
+            except Exception as exc:
+                logger.exception("Module handle_message crashed: %s", module.card.id)
+                results.append(HandlerResult.failed(module.card.id, str(exc)))
+                continue
             results.append(result)
             if result.status == "handled":
                 break
@@ -84,6 +90,19 @@ def create_default_registry(
                 enabled=config.modules.magnet_import,
             ),
             config.magnet_import,
+            project_root,
+        )
+    )
+    registry.register(
+        RexWidgetSyncModule(
+            ModuleCard(
+                id="rex_widget_sync",
+                name="Rex 模块同步",
+                description="监听 REX 模块分享频道，自动把新模块和新版本添加/更新到 Rex Widget Hub 的合集。",
+                category="automation",
+                enabled=config.modules.rex_widget_sync,
+            ),
+            config.rex_widget_sync,
             project_root,
         )
     )

@@ -13,6 +13,7 @@ from typing import Any, Callable
 
 from telegram_bot.config import RedPacketConfig, RedPacketTemplateConfig
 from telegram_bot.shared.contracts import HandlerResult
+from telegram_bot.shared.telegram_io import atomic_write_text
 
 from .base import ModuleCard
 
@@ -37,6 +38,7 @@ class RedPacketModule:
         self.claimed_ids = self._load_claimed_ids()
         self._claim_lock = asyncio.Lock()
         self._inflight_claims: set[tuple[str, str]] = set()
+        self._pre_click_sent: dict[tuple[str, str], float] = {}
         self._sync_card_config()
 
     async def start(self) -> None:
@@ -62,37 +64,67 @@ class RedPacketModule:
         if template is None:
             return HandlerResult.ignored(self.card.id)
 
-        red_packet_id = self.extract_red_packet_id(text, template)
+        red_packet_id = self.extract_red_packet_id(text, template) or (
+            "" if template.id_markers else _message_claim_key(message)
+        )
         if not red_packet_id:
             logger.warning("Red packet template matched but no red packet id was extracted: %s", template.id)
             return HandlerResult.failed(self.card.id, "matched template but no red packet id was extracted")
-        if self._is_claimed(template.id, red_packet_id):
-            logger.info("Red packet already claimed: template=%s id=%s", template.id, red_packet_id)
-            return HandlerResult.ignored(self.card.id)
 
         passphrase = self.extract_passphrase(text, template)
         if not passphrase:
             logger.warning("Red packet template matched but no passphrase was extracted: %s", template.id)
             return HandlerResult.failed(self.card.id, "matched template but no passphrase was extracted")
 
-        self._mark_claimed(template.id, red_packet_id)
-        if hasattr(message, "respond"):
-            delay_seconds = max(0, int(self.config.send_delay_ms or 0)) / 1000
-            if delay_seconds:
-                logger.info("Red packet send delayed: template=%s id=%s delay_ms=%s", template.id, red_packet_id, self.config.send_delay_ms)
-                await asyncio.sleep(delay_seconds)
-            await message.respond(passphrase)
-        logger.info("Red packet template matched: %s", template.name or template.id)
-        return HandlerResult.handled(
-            self.card.id,
-            "red packet passphrase sent",
-            {
-                "template_id": template.id,
-                "template_name": template.name,
-                "red_packet_id": red_packet_id,
-                "passphrase": passphrase,
-            },
-        )
+        template_id = template.id
+        template_name = template.name
+        send_delay_ms = max(0, min(int(self.config.send_delay_ms or 0), 60_000))
+        claim_key = (template_id, red_packet_id)
+
+        async with self._claim_lock:
+            if self._is_claimed(template_id, red_packet_id) or claim_key in self._inflight_claims:
+                logger.info("Red packet already claimed or in progress: template=%s id=%s", template_id, red_packet_id)
+                return HandlerResult.ignored(self.card.id)
+            self._inflight_claims.add(claim_key)
+
+        try:
+            source_message = _event_message(message)
+            respond = getattr(source_message, "respond", None)
+            if callable(respond):
+                if send_delay_ms:
+                    logger.info(
+                        "Red packet send delayed: template=%s id=%s delay_ms=%s",
+                        template_id,
+                        red_packet_id,
+                        send_delay_ms,
+                    )
+                    await asyncio.sleep(send_delay_ms / 1000)
+                try:
+                    await respond(passphrase)
+                except Exception as exc:
+                    logger.warning(
+                        "Red packet passphrase send failed: template=%s id=%s error=%s",
+                        template_id,
+                        red_packet_id,
+                        exc,
+                    )
+                    return HandlerResult.failed(self.card.id, f"red packet passphrase send failed: {exc}")
+            async with self._claim_lock:
+                self._mark_claimed(template_id, red_packet_id)
+            logger.info("Red packet template matched: %s", template_name or template_id)
+            return HandlerResult.handled(
+                self.card.id,
+                "red packet passphrase sent",
+                {
+                    "template_id": template_id,
+                    "template_name": template_name,
+                    "red_packet_id": red_packet_id,
+                    "passphrase": passphrase,
+                },
+            )
+        finally:
+            async with self._claim_lock:
+                self._inflight_claims.discard(claim_key)
 
     async def _handle_click_button(self, message: Any, text: str) -> HandlerResult | None:
         template = self.match_button_template(text, message)
@@ -187,51 +219,54 @@ class RedPacketModule:
                     initial_metadata,
                 )
 
-            if not pre_click_messages:
-                logger.warning("Red packet pre-click messages are empty: template=%s id=%s", template_id, red_packet_id)
-                return HandlerResult(
-                    status="failed",
-                    module_id=self.card.id,
-                    message="red packet pre-click messages are empty",
-                    metadata=initial_metadata,
-                )
-
-            source_message = _event_message(message)
-            respond = getattr(source_message, "respond", None)
-            if not callable(respond):
-                logger.warning("Red packet message cannot respond before retry: template=%s id=%s", template_id, red_packet_id)
-                return HandlerResult(
-                    status="failed",
-                    module_id=self.card.id,
-                    message="red packet message does not expose a respond API",
-                    metadata=initial_metadata,
-                )
-
-            try:
-                selected_message = str(self.choice_func(list(pre_click_messages))).strip()
-                if not selected_message:
-                    logger.warning("Red packet pre-click message selection was empty: template=%s id=%s", template_id, red_packet_id)
+            already_spoke = _is_fresh_claim(self._pre_click_sent.get(claim_key), self.now_func())
+            if not already_spoke:
+                if not pre_click_messages:
+                    logger.warning("Red packet pre-click messages are empty: template=%s id=%s", template_id, red_packet_id)
                     return HandlerResult(
                         status="failed",
                         module_id=self.card.id,
                         message="red packet pre-click messages are empty",
                         metadata=initial_metadata,
                     )
-                await respond(selected_message)
-            except Exception as exc:
-                logger.warning("Red packet pre-click message failed: template=%s id=%s error=%s", template_id, red_packet_id, exc)
-                return HandlerResult(
-                    status="failed",
-                    module_id=self.card.id,
-                    message=f"red packet pre-click message failed: {exc}",
-                    metadata=initial_metadata,
-                )
 
-            logger.info("Red packet message sent before retry: template=%s id=%s", template_id, red_packet_id)
+                source_message = _event_message(message)
+                respond = getattr(source_message, "respond", None)
+                if not callable(respond):
+                    logger.warning("Red packet message cannot respond before retry: template=%s id=%s", template_id, red_packet_id)
+                    return HandlerResult(
+                        status="failed",
+                        module_id=self.card.id,
+                        message="red packet message does not expose a respond API",
+                        metadata=initial_metadata,
+                    )
 
-            if delay_before_click and send_delay_ms:
-                logger.info("Red packet retry click delayed: template=%s id=%s delay_ms=%s", template_id, red_packet_id, send_delay_ms)
-                await asyncio.sleep(send_delay_ms / 1000)
+                try:
+                    selected_message = str(self.choice_func(list(pre_click_messages))).strip()
+                    if not selected_message:
+                        logger.warning("Red packet pre-click message selection was empty: template=%s id=%s", template_id, red_packet_id)
+                        return HandlerResult(
+                            status="failed",
+                            module_id=self.card.id,
+                            message="red packet pre-click messages are empty",
+                            metadata=initial_metadata,
+                        )
+                    await respond(selected_message)
+                except Exception as exc:
+                    logger.warning("Red packet pre-click message failed: template=%s id=%s error=%s", template_id, red_packet_id, exc)
+                    return HandlerResult(
+                        status="failed",
+                        module_id=self.card.id,
+                        message=f"red packet pre-click message failed: {exc}",
+                        metadata=initial_metadata,
+                    )
+
+                self._pre_click_sent[claim_key] = self.now_func()
+                logger.info("Red packet message sent before retry: template=%s id=%s", template_id, red_packet_id)
+
+                if delay_before_click and send_delay_ms:
+                    logger.info("Red packet retry click delayed: template=%s id=%s delay_ms=%s", template_id, red_packet_id, send_delay_ms)
+                    await asyncio.sleep(send_delay_ms / 1000)
 
             try:
                 callback_result = await _click_message_button(message, target_text)
@@ -324,8 +359,6 @@ class RedPacketModule:
             red_packet_id = _extract_after_marker(text, marker)
             if red_packet_id:
                 return _first_token(red_packet_id)
-            if marker.casefold() in text.casefold():
-                return marker.strip()
         return ""
 
     def extract_passphrase(self, text: str, template: RedPacketTemplateConfig) -> str:
@@ -358,13 +391,13 @@ class RedPacketModule:
             len(self.config.pre_click_messages),
         )
 
-    def cleanup_claimed_ids(self) -> None:
+    def cleanup_claimed_ids(self, *, save: bool = True) -> None:
         now = self.now_func()
         changed = False
         for template_id in list(self.claimed_ids.keys()):
             entries = self.claimed_ids.get(template_id, {})
             if not isinstance(entries, dict):
-                self.claimed_ids[template_id] = {}
+                self.claimed_ids.pop(template_id, None)
                 changed = True
                 continue
             fresh = {
@@ -372,10 +405,16 @@ class RedPacketModule:
                 for red_packet_id, claimed_at in entries.items()
                 if _is_fresh_claim(claimed_at, now)
             }
-            if fresh != entries:
+            if not fresh:
+                self.claimed_ids.pop(template_id, None)
+                changed = True
+            elif fresh != entries:
                 self.claimed_ids[template_id] = fresh
                 changed = True
-        if changed:
+        for key in list(self._pre_click_sent.keys()):
+            if not _is_fresh_claim(self._pre_click_sent.get(key), now):
+                self._pre_click_sent.pop(key, None)
+        if save and changed:
             self._save_claimed_ids()
 
     def _sync_card_config(self) -> None:
@@ -401,7 +440,8 @@ class RedPacketModule:
         return _is_fresh_claim(claimed_at, self.now_func())
 
     def _mark_claimed(self, template_id: str, red_packet_id: str) -> None:
-        self.cleanup_claimed_ids()
+        self.cleanup_claimed_ids(save=False)
+        self._pre_click_sent.pop((template_id, red_packet_id), None)
         self.claimed_ids.setdefault(template_id, {})[red_packet_id] = self.now_func()
         self._save_claimed_ids()
 
@@ -431,15 +471,14 @@ class RedPacketModule:
     def _save_claimed_ids(self) -> None:
         if self.claimed_ids_path is None:
             return
-        self.claimed_ids_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "version": 1,
             "ttl_seconds": CLAIM_TTL_SECONDS,
             "templates": self.claimed_ids,
         }
-        self.claimed_ids_path.write_text(
+        atomic_write_text(
+            self.claimed_ids_path,
             json.dumps(payload, indent=2, ensure_ascii=False),
-            encoding="utf-8",
         )
 
 
@@ -476,7 +515,7 @@ def _message_text(message: Any) -> str:
 def _matches_any(text: str, values: list[str]) -> bool:
     cleaned = [value.casefold().strip() for value in values if value.strip()]
     if not cleaned:
-        return True
+        return False
     return any(value in text for value in cleaned)
 
 
@@ -496,13 +535,13 @@ def _extract_after_marker(text: str, marker: str) -> str:
     marker = marker.strip()
     if not marker:
         return ""
+    pattern = re.compile(re.escape(marker), re.IGNORECASE)
     lines = text.splitlines()
-    marker_folded = marker.casefold()
     for index, line in enumerate(lines):
-        position = line.casefold().find(marker_folded)
-        if position < 0:
+        match = pattern.search(line)
+        if match is None:
             continue
-        after = line[position + len(marker) :].strip()
+        after = line[match.end() :].strip()
         after = _strip_prefix_punctuation(after)
         if after:
             return _bounded_value(after)
@@ -576,7 +615,7 @@ def _message_button_texts(event: Any) -> list[str]:
         for button in row_buttons:
             text = getattr(button, "text", None)
             if isinstance(text, str) and text.strip():
-                texts.append(text.strip())
+                texts.append(text)
     return texts
 
 

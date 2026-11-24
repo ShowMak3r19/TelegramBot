@@ -135,7 +135,9 @@ def media_size_bytes(message: Any) -> int:
     file = getattr(message, "file", None)
     for value in (getattr(document, "size", 0), getattr(file, "size", 0) if file else 0):
         try:
-            return max(0, int(value or 0))
+            parsed = max(0, int(value or 0))
+            if parsed > 0:
+                return parsed
         except (TypeError, ValueError):
             continue
     return 0

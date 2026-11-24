@@ -71,6 +71,9 @@ class ChatHistoryBackfillJob:
     async def _run(self, groups: list[str]) -> None:
         try:
             for chat_id in groups:
+                if not _is_numeric_chat_id(chat_id):
+                    logger.warning("Chat history backfill skipped non-numeric chat target: %s", chat_id)
+                    continue
                 self.current_chat_id = chat_id
                 try:
                     await self._backfill_chat(chat_id)
@@ -78,7 +81,10 @@ class ChatHistoryBackfillJob:
                     raise
                 except Exception as exc:
                     self.last_error = str(exc)
-                    await asyncio.to_thread(self.store.mark_backfill_failed, chat_id, str(exc))
+                    try:
+                        await asyncio.to_thread(self.store.mark_backfill_failed, chat_id, str(exc))
+                    except Exception:
+                        logger.exception("Failed to record backfill error state: chat_id=%s", chat_id)
                     logger.exception("Chat history backfill failed: chat_id=%s", chat_id)
         finally:
             self.current_chat_id = ""
@@ -156,6 +162,11 @@ class ChatHistoryBackfillJob:
             if chat_id and chat_id not in groups:
                 groups.append(chat_id)
         return groups
+
+
+def _is_numeric_chat_id(value: str) -> bool:
+    cleaned = str(value or "").strip()
+    return bool(cleaned) and (cleaned.isdigit() or (cleaned.startswith("-") and cleaned[1:].isdigit()))
 
 
 def _message_id(message: Any) -> int | None:

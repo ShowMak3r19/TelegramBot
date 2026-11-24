@@ -11,21 +11,24 @@ import subprocess
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 from telegram_bot.config import (
     ChatGamesConfig,
     EmojiRiddleItemConfig,
-    GarbledDecodeConfig,
     TimedImageGameConfig,
     _chat_games_config_from_dict,
 )
 from telegram_bot.shared.contracts import HandlerResult
 from telegram_bot.shared.telegram_io import (
+    atomic_write_text,
     event_message,
+    is_edited_event,
     is_outgoing,
     message_text,
+    prune_dir_files,
     safe_delete_message,
 )
 
@@ -66,6 +69,7 @@ class ActiveGame:
     ends_at: float
     correct: list[CorrectAnswer] = field(default_factory=list)
     correct_sender_ids: set[str] = field(default_factory=set)
+    timer_task: asyncio.Task[None] | None = None
 
 
 @dataclass(frozen=True)
@@ -84,6 +88,7 @@ class ChatGamesModule:
         self.state = self._load_state()
         self.active_games: dict[str, ActiveGame] = {}
         self._tasks: set[asyncio.Task[None]] = set()
+        self._start_locks: dict[str, asyncio.Lock] = {}
         self._sync_card_config()
 
     async def start(self) -> None:
@@ -93,12 +98,17 @@ class ChatGamesModule:
 
     async def stop(self) -> None:
         self.card.status = "stopped"
-        for task in list(self._tasks):
-            task.cancel()
+        tasks = list(self._tasks)
         self._tasks.clear()
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         self.active_games.clear()
 
     async def handle_message(self, event: Any) -> HandlerResult:
+        if is_edited_event(event):
+            return HandlerResult.ignored(self.card.id)
         message = event_message(event)
         text = message_text(message)
         chat_id = getattr(message, "chat_id", getattr(event, "chat_id", None))
@@ -134,8 +144,17 @@ class ChatGamesModule:
         data = values.get("chat_games", values)
         if not isinstance(data, dict):
             return
-        self.config = _chat_games_config_from_dict({**asdict(self.config), **data})
-        self.state_path = self._resolve_path(self.config.state_store)
+        merged = asdict(self.config)
+        for key, value in data.items():
+            if key in {"lucky_word", "emoji_riddle", "garbled_decode"} and isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key] = {**merged[key], **value}
+            else:
+                merged[key] = value
+        self.config = _chat_games_config_from_dict(merged)
+        new_state_path = self._resolve_path(self.config.state_store)
+        if new_state_path != self.state_path:
+            self.state_path = new_state_path
+            self.state = self._load_state()
         self.output_dir = self._resolve_path(self.config.output_dir)
         self._sync_card_config()
 
@@ -155,7 +174,7 @@ class ChatGamesModule:
             display_answer=item.answers[0],
             answer_set=answers,
             reward_text=reward_text,
-            image_builder=lambda output: render_emoji_riddle_png(item, output),
+            image_builder=lambda output: render_emoji_riddle_png(item, output, reward_text=reward_text),
             caption=build_emoji_riddle_caption(item, cfg.duration_seconds, reward_text),
         )
 
@@ -200,52 +219,57 @@ class ChatGamesModule:
             return
 
         chat_key = _chat_key(chat_id)
-        existing = self.active_games.get(chat_key)
-        if existing and time.time() < existing.ends_at:
-            if hasattr(client, "send_message"):
-                await client.send_message(chat_id, "上一题还没开奖，稍等一下。", reply_to=getattr(message, "id", None))
-            return
+        start_lock = self._start_locks.setdefault(chat_key, asyncio.Lock())
+        async with start_lock:
+            existing = self.active_games.get(chat_key)
+            if existing and time.time() < existing.ends_at:
+                if hasattr(client, "send_message"):
+                    await client.send_message(chat_id, "上一题还没开奖，稍等一下。", reply_to=getattr(message, "id", None))
+                return
 
-        if cfg.delete_command:
-            await safe_delete_message(message, "chat_games_command")
+            if cfg.delete_command:
+                await safe_delete_message(message, "chat_games_command")
 
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        game_id = f"{kind}_{int(time.time() * 1000)}"
-        output_path = self.output_dir / f"{game_id}_{_safe_chat_id(chat_id)}.png"
-        await asyncio.to_thread(image_builder, output_path)
-        sent = await client.send_file(
-            chat_id,
-            file=str(output_path),
-            caption=caption,
-            force_document=False,
-            reply_to=None if cfg.delete_command else getattr(message, "id", None),
-        )
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            game_id = f"{kind}_{int(time.time() * 1000)}"
+            output_path = self.output_dir / f"{game_id}_{_safe_chat_id(chat_id)}.png"
+            await asyncio.to_thread(image_builder, output_path)
+            prune_dir_files(self.output_dir, max_files=100, keep_names={output_path.name})
+            sent = await client.send_file(
+                chat_id,
+                file=str(output_path),
+                caption=caption,
+                force_document=False,
+                reply_to=None if cfg.delete_command else getattr(message, "id", None),
+            )
 
-        active = ActiveGame(
-            game_id=game_id,
-            kind=kind,
-            chat_id=chat_id,
-            client=client,
-            answer_set=answer_set,
-            display_answer=display_answer,
-            reward_text=reward_text,
-            winner_policy=cfg.winner_policy,
-            announce_answer=cfg.announce_answer,
-            prompt_message_id=getattr(sent, "id", None),
-            prompt_caption=caption,
-            ends_at=time.time() + max(0.1, float(cfg.duration_seconds)),
-        )
-        self.active_games[chat_key] = active
-        task = asyncio.create_task(self._settle_game(chat_key, game_id), name=f"chat-game-{game_id}")
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
-        self.card.metrics.update({"active_games": len(self.active_games), "last_started": kind})
-        logger.info("Chat game started: kind=%s chat_id=%s answer=%s", kind, chat_id, display_answer)
+            active = ActiveGame(
+                game_id=game_id,
+                kind=kind,
+                chat_id=chat_id,
+                client=client,
+                answer_set=answer_set,
+                display_answer=display_answer,
+                reward_text=reward_text,
+                winner_policy=cfg.winner_policy,
+                announce_answer=cfg.announce_answer,
+                prompt_message_id=getattr(sent, "id", None),
+                prompt_caption=caption,
+                ends_at=time.time() + max(0.1, float(cfg.duration_seconds)),
+            )
+            self.active_games[chat_key] = active
+            task = asyncio.create_task(self._settle_game(chat_key, game_id), name=f"chat-game-{game_id}")
+            active.timer_task = task
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
+            self.card.metrics.update({"active_games": len(self.active_games), "last_started": kind})
+            logger.info("Chat game started: kind=%s chat_id=%s answer=%s", kind, chat_id, display_answer)
 
     async def _record_active_game_answer(self, event: Any, message: Any, text: str, chat_id: Any) -> bool:
         if is_outgoing(event):
             return False
-        active = self.active_games.get(_chat_key(chat_id))
+        chat_key = _chat_key(chat_id)
+        active = self.active_games.get(chat_key)
         if active is None or time.time() > active.ends_at:
             return False
         normalized = _normalize_answer(text)
@@ -259,9 +283,13 @@ class ChatGamesModule:
         if sender:
             active.correct_sender_ids.add(sender)
         self.card.metrics.update({"last_correct_answers": len(active.correct)})
-        self.active_games.pop(_chat_key(chat_id), None)
-        self.card.metrics.update({"active_games": len(self.active_games)})
-        await self._award_game(active, answer)
+        if active.winner_policy == "first":
+            if self.active_games.get(chat_key) is active:
+                self.active_games.pop(chat_key, None)
+            if active.timer_task is not None and not active.timer_task.done():
+                active.timer_task.cancel()
+            self.card.metrics.update({"active_games": len(self.active_games)})
+            await self._award_game(active, answer)
         return True
 
     async def _settle_game(self, chat_key: str, game_id: str) -> None:
@@ -270,9 +298,10 @@ class ChatGamesModule:
             if active is None or active.game_id != game_id:
                 return
             await asyncio.sleep(max(0.0, active.ends_at - time.time()))
-            active = self.active_games.pop(chat_key, None)
+            active = self.active_games.get(chat_key)
             if active is None or active.game_id != game_id:
                 return
+            self.active_games.pop(chat_key, None)
 
             if active.correct:
                 await self._award_game(active, choose_winner(active.correct, active.winner_policy))
@@ -374,8 +403,7 @@ class ChatGamesModule:
         return data if isinstance(data, dict) else {"lucky_word": {}}
 
     def _save_state(self) -> None:
-        self.state_path.parent.mkdir(parents=True, exist_ok=True)
-        self.state_path.write_text(json.dumps(self.state, indent=2, ensure_ascii=False), encoding="utf-8")
+        atomic_write_text(self.state_path, json.dumps(self.state, indent=2, ensure_ascii=False))
 
     def _sync_card_config(self) -> None:
         self.card.config = asdict(self.config)
@@ -422,7 +450,10 @@ def extract_decode_start(text: str, prefixes: list[str], default_reward: str) ->
     if payload is None:
         return None
     reward_text = default_reward
-    match = _reward_match(payload)
+    # 优先匹配开头单独数字（如 "/decode 300 词句" 或 "/decode 200"），或任意位置显式 "+数字"
+    match = re.match(r"^\+?\s*(\d{1,6})(?=$|\s+)", payload)
+    if match is None:
+        match = re.search(r"(?<![\w\u4e00-\u9fff])\+\s*(\d{1,6})(?![\w\u4e00-\u9fff%])", payload)
     if match is not None:
         value = max(1, min(int(match.group(1)), 999999))
         reward_text = f"+{value}"
@@ -472,7 +503,7 @@ def build_garbled_decode_caption(duration_seconds: float, reward_text: str) -> s
     return f"🔐 乱码解码\n图里藏着一句话，{int(duration_seconds)} 秒内直接回复原句，第一个答中 {reward_text}。"
 
 
-def render_emoji_riddle_png(item: EmojiRiddleItemConfig, output_path: Path) -> Path:
+def render_emoji_riddle_png(item: EmojiRiddleItemConfig, output_path: Path, *, reward_text: str = "+100") -> Path:
     if Image is None or ImageDraw is None:
         raise RuntimeError("Pillow is not installed")
     width, height = 960, 540
@@ -488,58 +519,9 @@ def render_emoji_riddle_png(item: EmojiRiddleItemConfig, output_path: Path) -> P
     draw_centered_mixed_text(image, item.clue, clue_font, width, 236, "#111827")
     if item.hint:
         draw_centered_text(draw, f"提示：{item.hint}", hint_font, width, 390, "#334155")
-    draw.text((56, height - 70), "答对池开奖：+100", fill="#0f766e", font=hint_font)
+    draw.text((56, height - 70), f"答对奖励：{reward_text}", fill="#0f766e", font=hint_font)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     image.save(output_path, format="PNG")
-    return output_path
-
-
-def _render_garbled_decode_png_legacy(phrase: str, output_path: Path) -> Path:
-    if Image is None or ImageDraw is None or ImageFilter is None:
-        raise RuntimeError("Pillow is not installed")
-    seed = hashlib.sha256(f"{phrase}|{time.time_ns()}".encode("utf-8")).hexdigest()
-    rng = random.Random(seed)
-    width, height = 960, 420
-    base = Image.new("RGB", (width, height), "#f8fafc")
-    text_layer = Image.new("RGBA", (width, height), (255, 255, 255, 0))
-    draw = ImageDraw.Draw(text_layer)
-    title_font = load_font(34, prefer_emoji=False)
-    phrase_font = load_font(70, prefer_emoji=False)
-    draw.text((42, 32), "乱码解码", fill="#0f172a", font=title_font)
-    draw.text((42, 80), "切片错位了，但原句还在。", fill="#475569", font=load_font(26, prefer_emoji=False))
-    draw_centered_text(draw, phrase, phrase_font, width, 200, "#111827")
-
-    scrambled = Image.new("RGBA", (width, height), (255, 255, 255, 0))
-    strip_height = 18
-    for y in range(132, height - 54, strip_height):
-        offset = rng.randint(-22, 22)
-        strip = text_layer.crop((0, y, width, min(y + strip_height, height)))
-        if offset >= 0:
-            scrambled.alpha_composite(strip, (offset, y))
-            if offset:
-                scrambled.alpha_composite(strip.crop((0, 0, offset, strip.height)), (0, y))
-        else:
-            scrambled.alpha_composite(strip.crop((-offset, 0, width, strip.height)), (0, y))
-            scrambled.alpha_composite(strip.crop((width + offset, 0, width, strip.height)), (width + offset, y))
-
-    base = Image.alpha_composite(base.convert("RGBA"), scrambled)
-    draw = ImageDraw.Draw(base)
-    for _ in range(42):
-        x1 = rng.randint(30, width - 30)
-        y1 = rng.randint(130, height - 44)
-        x2 = min(width - 30, x1 + rng.randint(24, 120))
-        color = rng.choice(["#94a3b8", "#cbd5e1", "#67e8f9", "#a7f3d0", "#fde68a"])
-        draw.line((x1, y1, x2, y1 + rng.randint(-8, 8)), fill=color, width=rng.randint(1, 3))
-    for _ in range(36):
-        draw.text(
-            (rng.randint(48, width - 80), rng.randint(140, height - 70)),
-            rng.choice("乱码解码答案隐藏噪声0123456789"),
-            fill=rng.choice(["#cbd5e1", "#e2e8f0", "#bae6fd"]),
-            font=load_font(rng.randint(18, 30), prefer_emoji=False),
-        )
-    base = base.filter(ImageFilter.GaussianBlur(radius=0.35))
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    base.convert("RGB").save(output_path, format="PNG")
     return output_path
 
 
@@ -787,6 +769,7 @@ def draw_centered_text(draw: Any, text: str, font: Any, width: int, y: int, fill
     draw.text(((width - text_width) / 2, y), text, fill=fill, font=font)
 
 
+@lru_cache(maxsize=64)
 def load_font(size: int, *, prefer_emoji: bool) -> Any:
     if ImageFont is None:
         raise RuntimeError("Pillow is not installed")
@@ -801,7 +784,8 @@ def load_font(size: int, *, prefer_emoji: bool) -> Any:
         return ImageFont.load_default()
 
 
-def find_font_candidates(prefer_emoji: bool) -> list[str]:
+@lru_cache(maxsize=4)
+def find_font_candidates(prefer_emoji: bool) -> tuple[str, ...]:
     emoji_candidates = [
         r"C:\Windows\Fonts\seguiemj.ttf",
         "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
@@ -818,16 +802,17 @@ def find_font_candidates(prefer_emoji: bool) -> list[str]:
     ]
     ordered = (emoji_candidates + text_candidates) if prefer_emoji else text_candidates + emoji_candidates
     existing = [value for value in ordered if Path(value).exists()]
-    fc_match = shutil.which("fc-match")
-    if fc_match:
-        try:
-            query = "emoji" if prefer_emoji else "sans:lang=zh-cn"
-            output = subprocess.check_output([fc_match, "-f", "%{file}", query], text=True, timeout=2).strip()
-            if output and Path(output).exists():
-                existing.append(output)
-        except Exception:
-            logger.debug("fc-match did not return a usable font", exc_info=True)
-    return existing
+    if not existing:
+        fc_match = shutil.which("fc-match")
+        if fc_match:
+            try:
+                query = "emoji" if prefer_emoji else "sans:lang=zh-cn"
+                output = subprocess.check_output([fc_match, "-f", "%{file}", query], text=True, timeout=2).strip()
+                if output and Path(output).exists():
+                    existing.append(output)
+            except Exception:
+                logger.debug("fc-match did not return a usable font", exc_info=True)
+    return tuple(existing)
 
 
 def _normalize_answer(text: str) -> str:

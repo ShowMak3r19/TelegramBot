@@ -8,12 +8,74 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import re
+import tempfile
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 TELEGRAM_SAFE_TEXT_LIMIT = 3600
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def is_edited_event(event: Any) -> bool:
+    if bool(getattr(event, "_tgbot_edited", False)):
+        return True
+    cls_name = f"{type(event).__qualname__} {type(event).__name__}"
+    return "MessageEdited" in cls_name
+
+
+def atomic_write_text(path: Path, content: str, encoding: str = "utf-8") -> None:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding=encoding,
+            dir=str(target.parent),
+            prefix=f".{target.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as fh:
+            tmp_path = Path(fh.name)
+            fh.write(content)
+            fh.flush()
+        os.replace(tmp_path, target)
+    except BaseException:
+        if tmp_path is not None:
+            unlink_quietly(tmp_path)
+        raise
+
+
+def prune_dir_files(directory: Path, *, max_files: int = 200, keep_names: set[str] | None = None) -> int:
+    """保留目录下最新的 max_files 个普通文件，避免生成媒体无限堆积。"""
+    if max_files <= 0 or not directory.exists() or not directory.is_dir():
+        return 0
+    keep = keep_names or set()
+    try:
+        files = [item for item in directory.iterdir() if item.is_file() and not item.name.startswith(".")]
+    except OSError:
+        return 0
+    if len(files) <= max_files:
+        return 0
+    files.sort(key=lambda item: item.stat().st_mtime, reverse=True)
+    removed = 0
+    for stale in files[max_files:]:
+        if stale.name in keep:
+            continue
+        unlink_quietly(stale)
+        removed += 1
+    return removed
+
+
+def safe_filename_component(value: str, fallback: str = "item", max_length: int = 80) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "").strip()).strip("._-")
+    if not cleaned or cleaned in {".", ".."}:
+        return fallback
+    return cleaned[:max_length]
 
 
 def event_message(event: Any) -> Any:
@@ -69,9 +131,11 @@ async def safe_edit_message(message: Any, text: str, parse_mode: str | None = "h
         await message.edit(text, parse_mode=parse_mode, **kwargs)
         return True
     except Exception as exc:
-        logger.warning("Failed to edit message, retrying with truncated text: %s", exc)
+        logger.warning("Failed to edit message, retrying with truncated plain text: %s", exc)
+    fallback_text = _HTML_TAG_RE.sub("", text) if parse_mode == "html" else text
+    fallback_mode = None if parse_mode == "html" else parse_mode
     try:
-        await message.edit(truncate_text(text, 3000), parse_mode=parse_mode)
+        await message.edit(truncate_text(fallback_text, 3000), parse_mode=fallback_mode, **kwargs)
         return True
     except Exception:
         logger.exception("Failed to edit message after retry")

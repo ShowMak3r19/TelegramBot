@@ -5,8 +5,11 @@ import base64
 import html
 import json
 import logging
+import math
 import mimetypes
+import os
 import re
+import secrets
 import time
 import urllib.error
 import urllib.parse
@@ -19,14 +22,23 @@ from telegram_bot.config import AIConfig, AIImageConfig
 from telegram_bot.shared.ai_responses import extract_usage_counts
 from telegram_bot.shared.ai_messages import (
     collect_anthropic_text_and_sources,
+    collect_chat_completions_text_and_sources,
     is_anthropic_provider,
     make_sync_anthropic_client,
 )
-from telegram_bot.shared.telegram_io import safe_delete_message, safe_edit_message
+from telegram_bot.shared.telegram_io import (
+    atomic_write_text,
+    is_edited_event as _is_edited_event,
+    prune_dir_files,
+    safe_delete_message,
+    safe_edit_message,
+    truncate_text,
+)
 from telegram_bot.shared.telegram_media import (
     extract_first_frame_from_path_as_jpeg,
     media_is_motion,
     media_is_tgs_sticker,
+    media_size_bytes,
 )
 from telegram_bot.shared.contracts import HandlerResult
 from telegram_bot.shared.net import ensure_http_url
@@ -37,6 +49,10 @@ logger = logging.getLogger(__name__)
 
 AUTO_IMAGE_RATIO = "auto"
 TELEGRAM_PHOTO_SIZE_LIMIT = 10 * 1024 * 1024
+MAX_IMAGE_DOWNLOAD_BYTES = 50 * 1024 * 1024
+MAX_REFERENCE_STATIC_BYTES = 20 * 1024 * 1024
+MAX_REFERENCE_MOTION_BYTES = 100 * 1024 * 1024
+MAX_SAVED_GENERATED_IMAGES = 200
 MAX_CONTEXT_TEXT_CHARS = 8000
 XAI_IMAGINE_PROVIDER_TYPES = frozenset({"xai", "xai-compatible", "xai-imagine", "grok-imagine"})
 IMAGE_DOWNLOAD_HEADERS = {
@@ -72,6 +88,11 @@ class ImageProviderConfigError(ValueError):
 class ImageProviderRequestError(RuntimeError):
     """Raised when the image provider rejects an otherwise valid request."""
 
+    def __init__(self, message: str, *, status_code: int | None = None, xai_imagine: bool = False) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.xai_imagine = xai_imagine
+
 try:
     from PIL import Image
 except ImportError:  # pragma: no cover
@@ -87,6 +108,7 @@ class AIImageModule:
         self.output_dir = self._resolve_path(self.config.image.output_dir)
         self.tmp_dir = self._resolve_path("runtime/tmp")
         self.settings_path = self._resolve_path(self.config.image.settings_store)
+        self._active_messages: set[tuple[str, str]] = set()
         self._load_image_settings()
         self._sync_card_config()
 
@@ -103,6 +125,8 @@ class AIImageModule:
             return HandlerResult.ignored(self.card.id)
         if not _is_outgoing(event):
             return HandlerResult.ignored(self.card.id)
+        if _is_edited_event(event):
+            return HandlerResult.ignored(self.card.id)
 
         message = _event_message(event)
         if await self._handle_image_setting_command(message):
@@ -112,11 +136,18 @@ class AIImageModule:
         if prompt is None:
             return HandlerResult.ignored(self.card.id)
 
+        msg_key = (str(getattr(message, "chat_id", "")), str(getattr(message, "id", "")))
+        if msg_key[1] and msg_key in self._active_messages:
+            return HandlerResult.ignored(self.card.id)
+        if msg_key[1]:
+            self._active_messages.add(msg_key)
         try:
             await self._handle_image_generation(event, prompt)
         except Exception as exc:
             logger.exception("AI image generation failed: %s", exc)
             return HandlerResult.failed(self.card.id, str(exc))
+        finally:
+            self._active_messages.discard(msg_key)
         return HandlerResult.handled(self.card.id, "image generated", {"prompt": prompt})
 
     def update_config(self, values: dict[str, Any]) -> None:
@@ -191,79 +222,121 @@ class AIImageModule:
 
         output_path = self.output_dir / f"tg_image_{getattr(message, 'chat_id', 'chat')}_{getattr(message, 'id', int(time.time()))}.png"
         try:
-            image_path = await asyncio.to_thread(self._generate_image_with_openai_compatible_api, effective_prompt, output_path, reference_image_path)
-        except ImageProviderConfigError as exc:
-            logger.warning("AI image provider configuration error: %s", exc)
-            await safe_edit_message(
-                message,
-                format_image_status_message(
-                    display_prompt,
-                    f"配置错误：{exc}",
-                    self.image_model,
-                    self.config.image.ratio,
-                    self.config.image.size,
-                ),
-                parse_mode="html",
-            )
-            _unlink_quietly(reference_image_path)
-            return
-        except ImageProviderRequestError as exc:
-            logger.warning("AI image provider rejected request: %s", exc)
-            await safe_edit_message(
-                message,
-                format_image_status_message(
-                    display_prompt,
-                    f"请求失败：{exc}",
-                    self.image_model,
-                    self.config.image.ratio,
-                    self.config.image.size,
-                ),
-                parse_mode="html",
-            )
-            _unlink_quietly(reference_image_path)
-            return
-        except Exception as exc:
-            if reference_image_path and not is_timeout_error(exc):
-                logger.exception("Reference-image edit failed, trying describe-and-generate fallback: %s", exc)
-                try:
-                    reference_description = await asyncio.to_thread(self._call_ai_describe_reference_image, reference_image_path, prompt)
-                    fallback_prompt = (
-                        "请根据以下参考图描述进行生图，并执行用户修改要求。\n\n"
-                        f"参考图描述：\n{reference_description}\n\n"
-                        f"用户修改要求：\n{prompt or '根据参考图生成合适图片'}"
-                    )
-                    image_path = await asyncio.to_thread(self._generate_image_with_openai_compatible_api, fallback_prompt, output_path, None)
-                except Exception as fallback_exc:
-                    logger.exception("Reference fallback image generation failed: %s", fallback_exc)
-                    await safe_delete_message(message, "image_generation_cleanup")
-                    _unlink_quietly(reference_image_path)
-                    return
-            else:
-                logger.exception("Image generation failed; deleting status message: %s", exc)
-                await safe_delete_message(message, "image_generation_cleanup")
-                if reference_image_path:
-                    _unlink_quietly(reference_image_path)
+            try:
+                image_path = await asyncio.to_thread(self._generate_image_with_openai_compatible_api, effective_prompt, output_path, reference_image_path)
+            except ImageProviderConfigError as exc:
+                logger.warning("AI image provider configuration error: %s", exc)
+                await safe_edit_message(
+                    message,
+                    format_image_status_message(
+                        display_prompt,
+                        f"配置错误：{exc}",
+                        self.image_model,
+                        self.config.image.ratio,
+                        self.config.image.size,
+                    ),
+                    parse_mode="html",
+                )
                 return
-
-        if reference_image_path:
-            _unlink_quietly(reference_image_path)
+            except ImageProviderRequestError as exc:
+                allow_reference_fallback = bool(
+                    reference_image_path
+                    and not exc.xai_imagine
+                    and exc.status_code not in {401, 403, 429}
+                )
+                if allow_reference_fallback:
+                    logger.warning("Reference-image edit rejected (%s); trying describe-and-generate fallback", exc)
+                    try:
+                        reference_description = await asyncio.to_thread(self._call_ai_describe_reference_image, reference_image_path, prompt)
+                        fallback_prompt = (
+                            "请根据以下参考图描述进行生图，并执行用户修改要求。\n\n"
+                            f"参考图描述：\n{reference_description}\n\n"
+                            f"用户修改要求：\n{prompt or '根据参考图生成合适图片'}"
+                        )
+                        image_path = await asyncio.to_thread(self._generate_image_with_openai_compatible_api, fallback_prompt, output_path, None)
+                    except Exception as fallback_exc:
+                        logger.exception("Reference fallback image generation failed: %s", fallback_exc)
+                        await safe_edit_message(
+                            message,
+                            format_image_status_message(
+                                display_prompt,
+                                f"请求失败：{exc}",
+                                self.image_model,
+                                self.config.image.ratio,
+                                self.config.image.size,
+                            ),
+                            parse_mode="html",
+                        )
+                        return
+                else:
+                    logger.warning("AI image provider rejected request: %s", exc)
+                    await safe_edit_message(
+                        message,
+                        format_image_status_message(
+                            display_prompt,
+                            f"请求失败：{exc}",
+                            self.image_model,
+                            self.config.image.ratio,
+                            self.config.image.size,
+                        ),
+                        parse_mode="html",
+                    )
+                    return
+            except Exception as exc:
+                if reference_image_path and not is_timeout_error(exc):
+                    logger.exception("Reference-image edit failed, trying describe-and-generate fallback: %s", exc)
+                    try:
+                        reference_description = await asyncio.to_thread(self._call_ai_describe_reference_image, reference_image_path, prompt)
+                        fallback_prompt = (
+                            "请根据以下参考图描述进行生图，并执行用户修改要求。\n\n"
+                            f"参考图描述：\n{reference_description}\n\n"
+                            f"用户修改要求：\n{prompt or '根据参考图生成合适图片'}"
+                        )
+                        image_path = await asyncio.to_thread(self._generate_image_with_openai_compatible_api, fallback_prompt, output_path, None)
+                    except Exception as fallback_exc:
+                        logger.exception("Reference fallback image generation failed: %s", fallback_exc)
+                        await safe_delete_message(message, "image_generation_cleanup")
+                        return
+                else:
+                    logger.exception("Image generation failed; deleting status message: %s", exc)
+                    await safe_delete_message(message, "image_generation_cleanup")
+                    return
+        finally:
+            if reference_image_path:
+                _unlink_quietly(reference_image_path)
 
         caption_prompt = display_prompt if not reference_note else f"{display_prompt}（{reference_note}）"
         caption = format_image_caption(caption_prompt, self.image_model, self.config.image.ratio, self.config.image.size)
-        send_as_document = self._should_send_generated_image_as_document(image_path)
+        send_as_document = await asyncio.to_thread(self._should_send_generated_image_as_document, image_path)
         status_text = "✅ 图片已生成，正在发送原图文件……" if send_as_document else "✅ 图片已生成，正在发送图片……"
         await safe_edit_message(message, status_text, parse_mode="html")
 
         reply_to = getattr(replied_message, "id", None) if replied_message is not None else None
-        await event.client.send_file(
-            getattr(message, "chat_id", getattr(event, "chat_id", None)),
-            file=str(image_path),
-            caption=caption,
-            parse_mode="html",
-            force_document=send_as_document,
-            reply_to=reply_to,
-        )
+        try:
+            await event.client.send_file(
+                getattr(message, "chat_id", getattr(event, "chat_id", None)),
+                file=str(image_path),
+                caption=caption,
+                parse_mode="html",
+                force_document=send_as_document,
+                reply_to=reply_to,
+            )
+        except Exception as exc:
+            logger.exception("Failed to send generated image: %s", exc)
+            await safe_edit_message(
+                message,
+                format_image_status_message(
+                    display_prompt,
+                    f"发送失败：{exc}",
+                    self.image_model,
+                    self.config.image.ratio,
+                    self.config.image.size,
+                ),
+                parse_mode="html",
+            )
+            return
         await safe_delete_message(message, "image_generation_cleanup")
+        await asyncio.to_thread(prune_dir_files, self.output_dir, max_files=MAX_SAVED_GENERATED_IMAGES, keep_names={image_path.name})
 
     async def _handle_image_setting_command(self, message: Any) -> bool:
         text = _message_text(message)
@@ -346,6 +419,12 @@ class AIImageModule:
         return effective_prompt, reference_image_path, reference_note
 
     async def _download_reference_image(self, message: Any) -> tuple[Path | None, str]:
+        known_size = media_size_bytes(message)
+        is_motion = media_is_motion(message)
+        max_allowed = MAX_REFERENCE_MOTION_BYTES if is_motion else MAX_REFERENCE_STATIC_BYTES
+        if known_size and known_size > max_allowed:
+            logger.warning("Skipped oversized reference media bytes=%s limit=%s", known_size, max_allowed)
+            return None, ""
         self.tmp_dir.mkdir(parents=True, exist_ok=True)
         try:
             downloaded = await message.download_media(file=self.tmp_dir)
@@ -360,14 +439,16 @@ class AIImageModule:
                 logger.info("Skipped unsupported Telegram TGS sticker reference media: %s", source_path)
                 _unlink_quietly(source_path)
                 return None, ""
-            if media_is_motion(message):
-                frame = extract_first_frame_from_path_as_jpeg(source_path)
-                if frame:
-                    output_path = source_path.with_suffix(".jpg")
-                    output_path.write_bytes(frame)
+            if is_motion:
+                frame = await asyncio.to_thread(extract_first_frame_from_path_as_jpeg, source_path)
+                if not frame:
                     _unlink_quietly(source_path)
-                    return output_path, "引用视频/动图关键帧"
-            normalized = normalize_image_file_to_jpeg(source_path)
+                    return None, ""
+                output_path = source_path.with_name(f"{source_path.stem}_frame.jpg")
+                output_path.write_bytes(frame)
+                _unlink_quietly(source_path)
+                return output_path, "引用视频/动图关键帧"
+            normalized = await asyncio.to_thread(normalize_image_file_to_jpeg, source_path)
             return normalized, "引用图片/静态贴纸"
         except Exception as exc:
             logger.exception("Reference media conversion failed: %s", exc)
@@ -436,9 +517,10 @@ class AIImageModule:
         request = urllib.request.Request(
             ensure_http_url(url),
             data=request_body,
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": content_type},
+            headers={"Content-Type": content_type},
             method="POST",
         )
+        request.add_unredirected_header("Authorization", f"Bearer {api_key}")
         try:
             with urllib.request.urlopen(request, timeout=self.config.image.timeout_seconds) as response:
                 data = json.loads(response.read().decode("utf-8"))
@@ -449,7 +531,11 @@ class AIImageModule:
             if not xai_imagine and not reference_image_path and should_fallback_to_responses_image_tool(body):
                 logger.info("Images API failed on image_generation tool routing; trying Responses image_generation tool.")
                 return self._generate_image_with_responses_tool(prompt, output_path)
-            raise ImageProviderRequestError(format_image_provider_http_error(exc.code, xai_imagine=xai_imagine)) from exc
+            raise ImageProviderRequestError(
+                format_image_provider_http_error(exc.code, xai_imagine=xai_imagine),
+                status_code=exc.code,
+                xai_imagine=xai_imagine,
+            ) from exc
         except Exception as exc:
             self._record_ai_usage(feature, "images", self.image_model, False, started_at, error=str(exc))
             raise
@@ -478,9 +564,10 @@ class AIImageModule:
         request = urllib.request.Request(
             ensure_http_url(url),
             data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            headers={"Content-Type": "application/json"},
             method="POST",
         )
+        request.add_unredirected_header("Authorization", f"Bearer {api_key}")
         try:
             with urllib.request.urlopen(request, timeout=self.config.image.timeout_seconds) as response:
                 data = json.loads(response.read().decode("utf-8"))
@@ -507,7 +594,7 @@ class AIImageModule:
             raise ValueError("参考图理解需要 reply_provider.api_key 和 reply_provider.model。")
         mime_type = mimetypes.guess_type(str(image_path))[0] or "image/jpeg"
         data_url = "data:" + mime_type + ";base64," + base64.b64encode(image_path.read_bytes()).decode("ascii")
-        payload = {
+        payload: dict[str, Any] = {
             "model": model,
             "messages": [
                 {
@@ -518,16 +605,18 @@ class AIImageModule:
                     ],
                 }
             ],
-            "temperature": 0.2,
             "max_tokens": 800,
         }
+        if not model.lower().startswith(("gpt-5", "o3", "o4")):
+            payload["temperature"] = 0.2
         started_at = time.monotonic()
         request = urllib.request.Request(
             ensure_http_url(base_url + "/chat/completions"),
             data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            headers={"Content-Type": "application/json"},
             method="POST",
         )
+        request.add_unredirected_header("Authorization", f"Bearer {api_key}")
         try:
             with urllib.request.urlopen(request, timeout=self.config.reply.timeout_seconds) as response:
                 data = json.loads(response.read().decode("utf-8"))
@@ -535,7 +624,8 @@ class AIImageModule:
         except Exception as exc:
             self._record_ai_usage("reference_image_understanding", "chat_completions", model, False, started_at, error=str(exc))
             raise
-        return data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+        answer, _sources = collect_chat_completions_text_and_sources(data)
+        return answer
 
     def _describe_reference_with_anthropic(self, image_path: Path, edit_prompt: str) -> str:
         provider = self.config.reply_provider
@@ -619,6 +709,8 @@ class AIImageModule:
         except (OSError, json.JSONDecodeError):
             logger.warning("Failed to load image settings store: %s", self.settings_path)
             return
+        if not isinstance(data, dict):
+            return
         if data.get("size"):
             self.config.image.size = str(data["size"])
         if data.get("ratio"):
@@ -635,10 +727,7 @@ class AIImageModule:
             "model": self.image_model,
             "send_mode": self.config.image.send_mode,
         }
-        self.settings_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.settings_path.with_suffix(self.settings_path.suffix + ".tmp")
-        tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(self.settings_path)
+        atomic_write_text(self.settings_path, json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         self._sync_card_config()
 
     def _sync_card_config(self) -> None:
@@ -712,7 +801,7 @@ def format_image_status_message(prompt: str, status: str, model: str, ratio: str
 
 
 def format_image_caption(prompt: str, model: str, ratio: str, size: str) -> str:
-    safe_prompt = html.escape(prompt.strip() or "未提供提示词")
+    safe_prompt = html.escape(truncate_text(prompt.strip() or "未提供提示词", 700))
     safe_model = html.escape(model.strip() or "unknown")
     safe_ratio = html.escape(ratio.strip() or "未配置")
     safe_size = html.escape(size.strip() or "未配置")
@@ -784,17 +873,21 @@ def resolve_image_api_size(display_size: str, ratio: str) -> str:
 
 
 def encode_multipart_formdata(fields: dict[str, str], files: dict[str, tuple[str, bytes, str]]) -> tuple[bytes, str]:
-    boundary = "----TgBotFormBoundary" + str(int(time.time() * 1000))
+    boundary = "----TgBotFormBoundary" + secrets.token_hex(12)
     body = bytearray()
     for name, value in fields.items():
+        safe_field = re.sub(r'[\r\n"\\]', "_", str(name))
         body.extend(f"--{boundary}\r\n".encode("utf-8"))
-        body.extend(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"))
+        body.extend(f'Content-Disposition: form-data; name="{safe_field}"\r\n\r\n'.encode("utf-8"))
         body.extend(str(value).encode("utf-8"))
         body.extend(b"\r\n")
     for name, (filename, content, mime_type) in files.items():
+        safe_field = re.sub(r'[\r\n"\\]', "_", str(name))
+        safe_name = re.sub(r'[\r\n"\\/]', "_", Path(str(filename or "reference.jpg")).name) or "reference.jpg"
+        safe_mime = re.sub(r"[\r\n]", "", str(mime_type or "application/octet-stream"))
         body.extend(f"--{boundary}\r\n".encode("utf-8"))
-        body.extend(f'Content-Disposition: form-data; name="{name}"; filename="{filename}"\r\n'.encode("utf-8"))
-        body.extend(f"Content-Type: {mime_type}\r\n\r\n".encode("utf-8"))
+        body.extend(f'Content-Disposition: form-data; name="{safe_field}"; filename="{safe_name}"\r\n'.encode("utf-8"))
+        body.extend(f"Content-Type: {safe_mime}\r\n\r\n".encode("utf-8"))
         body.extend(content)
         body.extend(b"\r\n")
     body.extend(f"--{boundary}--\r\n".encode("utf-8"))
@@ -883,7 +976,13 @@ def save_image_api_result(
             # forward it to a different image/CDN origin.
             image_request.add_unredirected_header("Authorization", f"Bearer {api_key}")
         with urllib.request.urlopen(image_request, timeout=timeout_seconds) as response:
-            output_path.write_bytes(response.read())
+            try:
+                raw = response.read(MAX_IMAGE_DOWNLOAD_BYTES + 1)
+            except TypeError:
+                raw = response.read()
+            if len(raw) > MAX_IMAGE_DOWNLOAD_BYTES:
+                raise RuntimeError("返回图片超过最大体积限制（50MB）")
+            output_path.write_bytes(raw)
         return output_path
     raise RuntimeError(f"图片 API 未返回 b64_json 或 url：{data}")
 
@@ -935,8 +1034,14 @@ def normalize_image_file_to_jpeg(image_path: Path) -> Path:
             background.paste(img.convert("RGBA"), mask=alpha)
         else:
             background = img.convert("RGB")
-        output_path = image_path.with_suffix(".jpg")
-        background.save(output_path, format="JPEG", quality=90)
+    output_path = image_path.with_suffix(".jpg")
+    tmp_path = output_path.with_name(f".{output_path.stem}.{secrets.token_hex(4)}.jpg")
+    try:
+        background.save(tmp_path, format="JPEG", quality=90)
+        os.replace(tmp_path, output_path)
+    except BaseException:
+        _unlink_quietly(tmp_path)
+        raise
     if output_path != image_path:
         _unlink_quietly(image_path)
     return output_path
@@ -997,13 +1102,21 @@ def _unlink_quietly(path: Path | None) -> None:
 
 
 def _image_config_from_dict(data: dict[str, Any]) -> AIImageConfig:
+    defaults = AIImageConfig()
+    raw_timeout = data.get("timeout_seconds")
+    try:
+        parsed_timeout = defaults.timeout_seconds if raw_timeout is None or raw_timeout == "" else float(raw_timeout)
+        timeout_seconds = max(5.0, min(parsed_timeout, 600.0)) if math.isfinite(parsed_timeout) else defaults.timeout_seconds
+    except (TypeError, ValueError):
+        timeout_seconds = defaults.timeout_seconds
+    quality = defaults.quality if data.get("quality") is None else str(data.get("quality"))
     return AIImageConfig(
         command_prefixes=_clean_list(data.get("command_prefixes")),
         size=str(data.get("size") or "1K"),
         ratio=str(data.get("ratio") or "1:1"),
-        quality=str(data.get("quality") or "standard"),
+        quality=quality,
         send_mode=str(data.get("send_mode") or "auto"),
-        timeout_seconds=float(data.get("timeout_seconds") or 120.0),
+        timeout_seconds=timeout_seconds,
         output_dir=str(data.get("output_dir") or "runtime/data/generated_images"),
         settings_store=str(data.get("settings_store") or "runtime/data/image_settings.json"),
         size_commands=_clean_list(data.get("size_commands")),

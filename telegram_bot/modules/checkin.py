@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import re
 import time
+import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, time as datetime_time
 from pathlib import Path
@@ -12,6 +14,7 @@ from typing import Any, Awaitable, Callable
 
 from telegram_bot.config import CheckinConfig, CheckinTaskConfig
 from telegram_bot.shared.contracts import HandlerResult
+from telegram_bot.shared.telegram_io import atomic_write_text
 
 from .base import ModuleCard
 
@@ -96,30 +99,41 @@ class CheckinModule:
         new_tasks = self.config.tasks
         tasks = values.get("tasks")
         if isinstance(tasks, list):
-            new_tasks = [
+            parsed_tasks = [
                 _task_from_dict(item) for item in tasks if isinstance(item, dict)
             ]
+            seen_ids: set[str] = set()
+            for task in parsed_tasks:
+                while task.id in seen_ids:
+                    task.id = f"checkin_{uuid.uuid4().hex[:12]}"
+                seen_ids.add(task.id)
+            new_tasks = parsed_tasks
 
         new_poll_interval = self.config.poll_interval_seconds
         if "poll_interval_seconds" in values:
-            new_poll_interval = max(
-                1.0, min(float(values.get("poll_interval_seconds") or 10.0), 300.0)
-            )
+            raw_poll = values.get("poll_interval_seconds")
+            parsed_poll = 10.0 if raw_poll is None or raw_poll == "" else float(raw_poll)
+            if not math.isfinite(parsed_poll):
+                raise ValueError("轮询间隔必须是有限数字")
+            new_poll_interval = max(1.0, min(parsed_poll, 30.0))
 
         new_state_store = self.config.state_store
         new_state_path = self.state_path
         new_sent_keys = self.sent_keys
+        state_path_changed = False
         if "state_store" in values:
             new_state_store = str(
                 values.get("state_store") or "runtime/data/checkin_state.json"
             )
             new_state_path = self._resolve_path(new_state_store)
-            new_sent_keys = self._load_state(new_state_path)
+            if new_state_path != self.state_path:
+                state_path_changed = True
+                new_sent_keys = self._load_state(new_state_path)
 
         self.config.tasks = new_tasks
         self.config.poll_interval_seconds = new_poll_interval
         self.config.state_store = new_state_store
-        if "state_store" in values:
+        if state_path_changed:
             self.state_path = new_state_path
             self.sent_keys = new_sent_keys
         self._sync_card_config()
@@ -132,20 +146,20 @@ class CheckinModule:
     async def _run_loop(self) -> None:
         while True:
             try:
-                await self._tick(datetime.now())
+                await self._tick(datetime.now().astimezone())
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.exception("Checkin scheduler tick failed")
             await asyncio.sleep(
-                max(1.0, float(self.config.poll_interval_seconds or 10.0))
+                max(1.0, min(float(self.config.poll_interval_seconds or 10.0), 30.0))
             )
 
     async def _tick(self, now: datetime) -> None:
         if self.sender is None:
             logger.debug("Checkin scheduler waiting for Telegram sender")
             return
-        for task in self.config.tasks:
+        for task in list(self.config.tasks):
             if not task.enabled or not task.target.strip() or not task.message.strip():
                 continue
             schedule = task_cron(task)
@@ -155,7 +169,17 @@ class CheckinModule:
             key = build_sent_key(task.id, now, due_time)
             if key in self.sent_keys:
                 continue
-            await self.sender(task.target.strip(), task.message.strip())
+            try:
+                await self.sender(task.target.strip(), task.message.strip())
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception(
+                    "Checkin send failed: task=%s target=%s",
+                    task.name or task.id,
+                    task.target,
+                )
+                continue
             self.sent_keys[key] = time.time()
             self._save_state(now)
             logger.info(
@@ -205,18 +229,17 @@ class CheckinModule:
         }
 
     def _save_state(self, now: datetime | None = None) -> None:
-        self.state_path.parent.mkdir(parents=True, exist_ok=True)
-        today_prefix = (now or datetime.now()).strftime("%Y-%m-%d")
+        today_prefix = (now or datetime.now().astimezone()).strftime("%Y-%m-%d")
         self.sent_keys = {
             key: value
             for key, value in self.sent_keys.items()
             if key.startswith(today_prefix)
         }
-        self.state_path.write_text(
+        atomic_write_text(
+            self.state_path,
             json.dumps(
                 {"version": 1, "sent": self.sent_keys}, indent=2, ensure_ascii=False
             ),
-            encoding="utf-8",
         )
 
 
@@ -410,8 +433,9 @@ def _parse_cron_field(text: str, label: str, minimum: int, maximum: int) -> set[
             if step <= 0:
                 raise ValueError(f"Cron 的{label}字段步长必须大于 0")
 
+        step_maximum = 6 if label == "星期" else maximum
         if base == "*":
-            start, end = minimum, maximum
+            start, end = minimum, step_maximum
         elif "-" in base:
             if base.count("-") != 1:
                 raise ValueError(f"Cron 的{label}字段范围无效：{base}")
@@ -420,7 +444,10 @@ def _parse_cron_field(text: str, label: str, minimum: int, maximum: int) -> set[
             end = _cron_int(end_text, label, "范围终点")
         else:
             start = _cron_int(base, label, "值")
-            end = maximum if separator else start
+            if separator:
+                end = step_maximum if start <= step_maximum else maximum
+            else:
+                end = start
 
         if not minimum <= start <= maximum or not minimum <= end <= maximum:
             raise ValueError(
@@ -500,7 +527,7 @@ def _task_from_dict(data: dict[str, Any]) -> CheckinTaskConfig:
     )
     schedule = validate_cron_schedule(schedule)
     return CheckinTaskConfig(
-        id=str(data.get("id") or "").strip() or f"checkin_{int(time.time() * 1000)}",
+        id=str(data.get("id") or "").strip() or f"checkin_{uuid.uuid4().hex[:12]}",
         name=str(data.get("name") or "").strip(),
         enabled=bool(data.get("enabled", True)),
         target=str(data.get("target") or "").strip(),

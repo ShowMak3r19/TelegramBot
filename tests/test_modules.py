@@ -70,8 +70,6 @@ def test_ai_module_toggle_syncs_provider_enabled(tmp_path: Path) -> None:
     assert app.config.ai.image_provider.enabled is True
 
 
-
-
 def test_ai_service_provider_type_updates_from_admin(tmp_path: Path) -> None:
     app = TelegramBotApplication(AppConfig(), tmp_path / "config.json")
 

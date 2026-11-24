@@ -26,7 +26,14 @@ class RecentLogBuffer(logging.Handler):
             self.records = self.records[-self.capacity :]
 
     def tail(self, limit: int = 100) -> list[dict[str, str]]:
-        return self.records[-limit:]
+        count = max(0, int(limit or 0))
+        if not count:
+            return []
+        self.acquire()
+        try:
+            return list(self.records[-count:])
+        finally:
+            self.release()
 
 
 def configure_logging(config: LogConfig, project_root: Path) -> RecentLogBuffer:
@@ -105,9 +112,12 @@ def read_log_tail(config: LogConfig, project_root: Path, name: str, lines: int =
         raise ValueError("Invalid log file path")
     if not path.exists() or not path.is_file():
         raise FileNotFoundError(name)
+    count = max(0, min(int(lines or 0), 10_000))
+    if not count:
+        return ""
     with path.open("r", encoding="utf-8", errors="replace") as fp:
         content = fp.readlines()
-    return "".join(content[-lines:])
+    return "".join(content[-count:])
 
 
 def _resolve_path(project_root: Path, value: str) -> Path:

@@ -1,12 +1,12 @@
 {
-  "name": "TelegramBot 控制台",
-  "short_name": "TelegramBot",
-  "description": "TelegramBot NAS management console",
+  "name": "Telebot 控制台",
+  "short_name": "Telebot",
+  "description": "Telebot management console",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#f4f8f8",
-  "theme_color": "#008ee8",
+  "background_color": "#110e0d",
+  "theme_color": "#c06359",
   "icons": [
     {
       "src": "/assets/icon-192.png",

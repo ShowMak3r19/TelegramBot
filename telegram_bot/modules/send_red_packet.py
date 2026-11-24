@@ -10,10 +10,12 @@ import html
 import asyncio
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+from types import SimpleNamespace
 
 from telegram_bot.config import SendRedPacketConfig, SendRedPacketTemplateConfig
 from telegram_bot.shared.contracts import HandlerResult
+from telegram_bot.shared.telegram_io import atomic_write_text, is_edited_event
 
 from .base import ModuleCard
 
@@ -25,6 +27,7 @@ TRANSFER_MESSAGE_DELETE_SECONDS = 30.0
 MIN_PACKET_AMOUNT = 2
 STRICT_MIN_PACKET_AMOUNT = 101
 STRICT_MIN_PACKET_GROUP_IDS: set[str] = set()
+MAX_PACKET_TOTAL_AMOUNT = 10**12
 
 
 @dataclass
@@ -82,21 +85,94 @@ class SendRedPacketModule:
         self.state_path = self._resolve_path(self.config.state_store)
         self.active_packets = self._load_state()
         self._claim_lock = asyncio.Lock()
+        self._history_reader: Any = None
+        self._programmatic_message_checker: Callable[[Any], bool] | None = None
+        self._recovery_task: asyncio.Task | None = None
+        self._delete_tasks: set[asyncio.Task[Any]] = set()
         self._sync_card_config()
+
+    def set_history_reader(self, reader: Any) -> None:
+        self._history_reader = reader
+
+    def set_programmatic_message_checker(self, checker: Callable[[Any], bool]) -> None:
+        self._programmatic_message_checker = checker
+
+    def request_claim_recovery(self) -> None:
+        if not self.card.enabled or self.card.status != "running" or self._history_reader is None:
+            return
+        if self._recovery_task is not None and not self._recovery_task.done():
+            return
+        self._recovery_task = asyncio.create_task(self._recover_claims(), name="send-red-packet-recovery")
 
     async def start(self) -> None:
         self.card.status = "running"
+        self.request_claim_recovery()
 
     async def stop(self) -> None:
         self.card.status = "stopped"
+        delete_tasks = list(self._delete_tasks)
+        self._delete_tasks.clear()
+        for delete_task in delete_tasks:
+            delete_task.cancel()
+        if delete_tasks:
+            await asyncio.gather(*delete_tasks, return_exceptions=True)
+        task = self._recovery_task
+        self._recovery_task = None
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    async def _recover_claims(self) -> None:
+        packets = sorted(list(self.active_packets.values()), key=lambda packet: packet.created_at)
+        for packet in packets:
+            if packet.template_type != "lucky_text" or not packet.announcement_message_id.isdigit():
+                continue
+            announcement_id = int(packet.announcement_message_id)
+            if announcement_id <= 0 or self.active_packets.get(packet.id) is not packet:
+                continue
+            try:
+                async for message in self._history_reader(packet.chat_id, min_id=announcement_id):
+                    if not self.card.enabled or self.card.status != "running":
+                        return
+                    if self.active_packets.get(packet.id) is not packet:
+                        break
+                    if int(getattr(message, "id", 0) or 0) <= announcement_id:
+                        continue
+                    if str(getattr(message, "chat_id", "")) != packet.chat_id or getattr(message, "out", False):
+                        continue
+                    sender_id = _sender_id(message)
+                    if not sender_id or sender_id == packet.creator_id:
+                        continue
+                    if any(claim.sender_id == sender_id for claim in packet.claims):
+                        continue
+                    if not is_packet_claim_text(packet, _message_text(message)):
+                        continue
+                    event = SimpleNamespace(message=message, client=getattr(message, "client", None))
+                    result = await self._claim_packet(event, packet)
+                    if result.status == "handled":
+                        logger.info(
+                            "Send red packet missed claim recovered: id=%s sender_id=%s message_id=%s amount=%s",
+                            packet.id, sender_id, message.id, result.metadata["amount"],
+                        )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Failed to recover send red packet claims: id=%s", packet.id)
 
     async def handle_message(self, event: Any) -> HandlerResult:
+        if is_edited_event(event):
+            return HandlerResult.ignored(self.card.id)
         message = _event_message(event)
         text = _message_text(message or event)
         if not text:
             return HandlerResult.ignored(self.card.id)
 
         if _is_outgoing(event):
+            if self._is_programmatic_message(message):
+                return HandlerResult.ignored(self.card.id)
             cancel_packet_id = parse_cancel_packet_command(text)
             if cancel_packet_id:
                 await safe_delete_message(message, "cancel send red packet command")
@@ -136,7 +212,7 @@ class SendRedPacketModule:
             return HandlerResult.handled(self.card.id, "unsupported send red packet template", {"template_id": template.id, "error": error})
         total_amount = int(command["total_amount"])
         packet_count = int(command["packet_count"])
-        passphrase = str(command["passphrase"]).strip()
+        passphrase = normalize_passphrase(str(command["passphrase"]))
         chat_id = str(getattr(message, "chat_id", getattr(event, "chat_id", "")))
         min_packet_amount = self._minimum_packet_amount(chat_id)
         error = validate_packet_request(total_amount, packet_count, passphrase, template.max_packet_count, min_packet_amount)
@@ -144,7 +220,6 @@ class SendRedPacketModule:
             await reply_to_message(event, error)
             return HandlerResult.handled(self.card.id, "invalid send red packet command", {"error": error})
 
-        self._trim_active_packets()
         packet = ActivePacket(
             id=self._new_packet_id(),
             template_id=template.id,
@@ -159,10 +234,18 @@ class SendRedPacketModule:
             allocations=split_amounts(total_amount, packet_count, self.rng, min_packet_amount=min_packet_amount),
             created_at=self.now_func(),
         )
-        sent = await reply_to_message(event, format_packet_announcement(packet), parse_mode="html")
+        async with self._claim_lock:
+            self.active_packets[packet.id] = packet
+            self._trim_active_packets()
+        try:
+            sent = await reply_to_message(event, format_packet_announcement(packet), parse_mode="html")
+        except Exception:
+            async with self._claim_lock:
+                self.active_packets.pop(packet.id, None)
+            raise
         packet.announcement_message_id = str(getattr(sent, "id", "") or "")
-        self.active_packets[packet.id] = packet
-        self._save_state()
+        async with self._claim_lock:
+            self._save_state()
         logger.info(
             "Send red packet created: id=%s chat_id=%s total=%s count=%s passphrase=%s",
             packet.id,
@@ -194,7 +277,6 @@ class SendRedPacketModule:
             return HandlerResult.handled(self.card.id, "invalid math quiz command", {"error": error})
 
         quiz = generate_math_quiz(self.rng)
-        self._trim_active_packets()
         packet = ActivePacket(
             id=self._new_packet_id(),
             template_id=template.id,
@@ -211,10 +293,18 @@ class SendRedPacketModule:
             quiz_question=quiz.question,
             quiz_explanation=quiz.explanation,
         )
-        sent = await reply_to_message(event, format_math_quiz_announcement(packet), parse_mode="html")
+        async with self._claim_lock:
+            self.active_packets[packet.id] = packet
+            self._trim_active_packets()
+        try:
+            sent = await reply_to_message(event, format_math_quiz_announcement(packet), parse_mode="html")
+        except Exception:
+            async with self._claim_lock:
+                self.active_packets.pop(packet.id, None)
+            raise
         packet.announcement_message_id = str(getattr(sent, "id", "") or "")
-        self.active_packets[packet.id] = packet
-        self._save_state()
+        async with self._claim_lock:
+            self._save_state()
         logger.info(
             "Math quiz red packet created: id=%s chat_id=%s reward=%s answer=%s kind=%s",
             packet.id,
@@ -263,26 +353,41 @@ class SendRedPacketModule:
                 self.active_packets.pop(active_packet.id, None)
             self._save_state()
 
-        transfer_message = await reply_to_message(event, f"+{claim.amount}", reply_to=getattr(message, "id", None))
-        self._schedule_transfer_message_delete(transfer_message, packet.id, claim.amount)
-        logger.info("Send red packet claimed: id=%s sender_id=%s amount=%s", packet.id, sender_id, claim.amount)
+        try:
+            transfer_message = await reply_to_message(event, f"+{claim.amount}", reply_to=getattr(message, "id", None))
+        except Exception as exc:
+            async with self._claim_lock:
+                try:
+                    active_packet.claims.remove(claim)
+                except ValueError:
+                    pass
+                if completed:
+                    self.active_packets[active_packet.id] = active_packet
+                self._save_state()
+            logger.exception("Send red packet transfer reply failed: id=%s sender_id=%s", active_packet.id, sender_id)
+            return HandlerResult.failed(self.card.id, f"send red packet transfer failed: {exc}")
+
+        self._schedule_transfer_message_delete(transfer_message, active_packet.id, claim.amount)
+        logger.info("Send red packet claimed: id=%s sender_id=%s amount=%s", active_packet.id, sender_id, claim.amount)
 
         if completed:
-            if packet.template_type == "math_quiz":
-                await self._complete_math_quiz(event, packet, claim)
+            if active_packet.template_type == "math_quiz":
+                await self._complete_math_quiz(event, active_packet, claim)
             else:
-                await self._send_summary(event, packet)
-            logger.info("Send red packet completed: id=%s claims=%s", packet.id, len(packet.claims))
+                await self._send_summary(event, active_packet)
+            logger.info("Send red packet completed: id=%s claims=%s", active_packet.id, len(active_packet.claims))
         return HandlerResult.handled(
             self.card.id,
             "send red packet claimed",
-            {"packet_id": packet.id, "amount": claim.amount, "completed": completed},
+            {"packet_id": active_packet.id, "amount": claim.amount, "completed": completed},
         )
 
     def _schedule_transfer_message_delete(self, message: Any, packet_id: str, amount: int) -> None:
         if self.transfer_message_delete_seconds is None or message is None or not hasattr(message, "delete"):
             return
-        asyncio.create_task(self._delete_transfer_message_after_delay(message, packet_id, amount))
+        task = asyncio.create_task(self._delete_transfer_message_after_delay(message, packet_id, amount))
+        self._delete_tasks.add(task)
+        task.add_done_callback(self._delete_tasks.discard)
 
     async def _delete_transfer_message_after_delay(self, message: Any, packet_id: str, amount: int) -> None:
         try:
@@ -316,7 +421,6 @@ class SendRedPacketModule:
             await reply_to_message(event, text, parse_mode="html")
 
     async def _send_packet_list(self, event: Any) -> HandlerResult:
-        message = _event_message(event)
         packets = self._list_unfinished_packets(event)
         await reply_to_message(event, format_packet_list(packets), parse_mode="html")
         logger.info("Send red packet active list requested: chat_id=%s count=%s", _chat_id(event), len(packets))
@@ -327,14 +431,20 @@ class SendRedPacketModule:
         )
 
     async def _cancel_packet(self, event: Any, packet_id: str) -> HandlerResult:
-        packet = self._find_cancellable_packet(event, packet_id)
-        if packet is None:
+        async with self._claim_lock:
+            packet = self._find_cancellable_packet(event, packet_id)
+            if packet is None:
+                found = None
+            else:
+                found = self.active_packets.pop(packet.id, None)
+                if found is not None:
+                    self._save_state()
+        if found is None:
             await reply_to_message(event, f"\u672a\u627e\u5230\u5f53\u524d\u7fa4\u7684\u672a\u5b8c\u6210\u7ea2\u5305\uff1a<code>{html.escape(packet_id)}</code>", parse_mode="html")
             logger.info("Send red packet cancel requested but packet not found: chat_id=%s id=%s", _chat_id(event), packet_id)
             return HandlerResult.handled(self.card.id, "send red packet cancel not found", {"packet_id": packet_id, "cancelled": False})
 
-        self.active_packets.pop(packet.id, None)
-        self._save_state()
+        packet = found
         edited = await safe_edit_message_by_id(event, packet.announcement_message_id, format_packet_cancelled(packet), parse_mode="html")
         if not edited:
             await reply_to_message(event, f"\u2705 \u5df2\u64a4\u9500\u7ea2\u5305 <code>{html.escape(packet.id)}</code>", parse_mode="html")
@@ -365,17 +475,31 @@ class SendRedPacketModule:
     def _find_claimable_packet(self, event: Any, text: str) -> ActivePacket | None:
         message = _event_message(event)
         chat_id = _chat_id(event)
+        sender_id = _sender_id(message or event)
         normalized = text.strip()
-        if not normalized:
+        if not normalized or not sender_id:
             return None
         candidates = [
             packet
             for packet in self.active_packets.values()
-            if packet.chat_id == chat_id and is_packet_claim_text(packet, normalized) and len(packet.claims) < packet.packet_count
+            if packet.chat_id == chat_id
+            and is_packet_claim_text(packet, normalized)
+            and len(packet.claims) < packet.packet_count
+            and packet.creator_id != sender_id
+            and not any(claim.sender_id == sender_id for claim in packet.claims)
         ]
         if not candidates:
             return None
         return sorted(candidates, key=lambda item: item.created_at)[0]
+
+    def _is_programmatic_message(self, message: Any) -> bool:
+        if self._programmatic_message_checker is None or message is None:
+            return False
+        try:
+            return bool(self._programmatic_message_checker(message))
+        except Exception:
+            logger.exception("Send red packet programmatic message check failed")
+            return False
 
     def update_config(self, values: dict[str, Any]) -> None:
         if isinstance(values.get("templates"), list):
@@ -386,8 +510,10 @@ class SendRedPacketModule:
             ]
         if "state_store" in values:
             self.config.state_store = str(values.get("state_store") or "runtime/data/send_red_packet_state.json")
-            self.state_path = self._resolve_path(self.config.state_store)
-            self.active_packets = self._load_state()
+            new_path = self._resolve_path(self.config.state_store)
+            if new_path != self.state_path:
+                self.state_path = new_path
+                self.active_packets = self._load_state()
         if "id_length" in values:
             self.config.id_length = max(4, min(int(values.get("id_length") or 6), 12))
         if "max_active_packets" in values:
@@ -452,12 +578,11 @@ class SendRedPacketModule:
     def _save_state(self) -> None:
         if self.state_path is None:
             return
-        self.state_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "version": 1,
             "active_packets": [packet_to_dict(packet) for packet in self.active_packets.values()],
         }
-        self.state_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        atomic_write_text(self.state_path, json.dumps(payload, indent=2, ensure_ascii=False))
         self._sync_card_config()
 
     def _resolve_path(self, value: str) -> Path:
@@ -469,22 +594,23 @@ class SendRedPacketModule:
 
 def parse_create_command(text: str, prefixes: list[str]) -> dict[str, Any] | None:
     stripped = text.strip()
-    for prefix in prefixes:
-        prefix = prefix.strip()
-        if not prefix:
-            continue
+    ordered = sorted((prefix.strip() for prefix in prefixes if prefix.strip()), key=len, reverse=True)
+    for prefix in ordered:
         if stripped == prefix:
             return {"total_amount": 0, "packet_count": 0, "passphrase": ""}
         if not stripped.startswith(prefix):
             continue
-        rest = stripped[len(prefix) :].strip()
+        tail = stripped[len(prefix) :]
+        if not tail or not tail[0].isspace():
+            continue
+        rest = tail.strip()
         match = re.match(r"^(\d+)\s+(\d+)\s+(.+)$", rest, flags=re.DOTALL)
         if not match:
             return {"total_amount": 0, "packet_count": 0, "passphrase": ""}
         return {
             "total_amount": int(match.group(1)),
             "packet_count": int(match.group(2)),
-            "passphrase": " ".join(match.group(3).split()),
+            "passphrase": normalize_passphrase(match.group(3)),
         }
     return None
 
@@ -497,15 +623,16 @@ def parse_template_command(text: str, template: SendRedPacketTemplateConfig) -> 
 
 def parse_math_quiz_command(text: str, prefixes: list[str]) -> dict[str, Any] | None:
     stripped = text.strip()
-    for prefix in prefixes:
-        prefix = prefix.strip()
-        if not prefix:
-            continue
+    ordered = sorted((prefix.strip() for prefix in prefixes if prefix.strip()), key=len, reverse=True)
+    for prefix in ordered:
         if stripped == prefix:
             return {"reward_amount": 0}
         if not stripped.startswith(prefix):
             continue
-        rest = stripped[len(prefix) :].strip()
+        tail = stripped[len(prefix) :]
+        if not tail or not tail[0].isspace():
+            continue
+        rest = tail.strip()
         match = re.match(r"^(\d+)$", rest)
         if not match:
             return {"reward_amount": 0}
@@ -552,8 +679,10 @@ def validate_packet_request(
     max_packet_count: int,
     min_packet_amount: int = MIN_PACKET_AMOUNT,
 ) -> str:
-    if total_amount <= 0 or packet_count <= 0 or not passphrase.strip():
+    if total_amount <= 0 or packet_count <= 0 or not normalize_passphrase(passphrase):
         return "\u7ea2\u5305\u683c\u5f0f\uff1a\u7ea2\u5305 10000 10 \u54c8\u54c8\u54c8"
+    if total_amount > MAX_PACKET_TOTAL_AMOUNT:
+        return f"\u7ea2\u5305\u603b\u989d\u4e0d\u80fd\u8d85\u8fc7 {MAX_PACKET_TOTAL_AMOUNT}"
     if packet_count > max_packet_count:
         return f"\u7ea2\u5305\u6570\u91cf\u4e0d\u80fd\u8d85\u8fc7 {max_packet_count}"
     min_packet_amount = max(2, int(min_packet_amount or MIN_PACKET_AMOUNT))
@@ -566,6 +695,8 @@ def validate_packet_request(
 def validate_math_quiz_request(reward_amount: int, min_packet_amount: int = MIN_PACKET_AMOUNT) -> str:
     if reward_amount <= 0:
         return "\u7b97\u672f\u9898\u683c\u5f0f\uff1a/math 6666"
+    if reward_amount > MAX_PACKET_TOTAL_AMOUNT:
+        return f"\u7b97\u672f\u9898\u5956\u52b1\u4e0d\u80fd\u8d85\u8fc7 {MAX_PACKET_TOTAL_AMOUNT}"
     min_packet_amount = max(2, int(min_packet_amount or MIN_PACKET_AMOUNT))
     if reward_amount < min_packet_amount:
         return f"\u7b97\u672f\u9898\u5956\u52b1\u4e0d\u80fd\u5c0f\u4e8e {min_packet_amount}"
@@ -608,12 +739,23 @@ def split_amounts(
     weights = [rng.random() for _ in range(packet_count)]
     weight_sum = sum(weights) or 1.0
     extras = [int(remaining * weight / weight_sum) for weight in weights]
-    while sum(extras) < remaining:
-        extras[rng.randrange(packet_count)] += 1
-    while sum(extras) > remaining:
-        index = rng.randrange(packet_count)
-        if extras[index] > 0:
-            extras[index] -= 1
+    diff = remaining - sum(extras)
+    if diff > 0:
+        base_add, rem = divmod(diff, packet_count)
+        if base_add:
+            extras = [extra + base_add for extra in extras]
+        for index in rng.sample(range(packet_count), rem):
+            extras[index] += 1
+    elif diff < 0:
+        excess = -diff
+        order = list(range(packet_count))
+        rng.shuffle(order)
+        for index in order:
+            if excess <= 0:
+                break
+            take = min(extras[index], excess)
+            extras[index] -= take
+            excess -= take
     amounts = [extra + min_packet_amount for extra in extras]
     rng.shuffle(amounts)
     return amounts
@@ -716,11 +858,18 @@ def _generate_square_pattern_quiz(rng: random.Random) -> MathQuiz:
     )
 
 
+def normalize_passphrase(value: str) -> str:
+    # Ignore copy/paste artifacts; preserve emoji joiners and variation selectors.
+    cleaned = value.translate(str.maketrans("", "", "\u200b\ufeff\u2060"))
+    return " ".join(cleaned.split())
+
+
 def is_packet_claim_text(packet: ActivePacket, text: str) -> bool:
     if packet.template_type == "math_quiz":
         answer = parse_math_quiz_answer(text)
         return bool(answer) and normalize_answer(answer) == normalize_answer(packet.passphrase)
-    return packet.passphrase.strip() == text.strip()
+    expected = normalize_passphrase(packet.passphrase)
+    return bool(expected) and expected == normalize_passphrase(text)
 
 
 def parse_math_quiz_answer(text: str) -> str | None:

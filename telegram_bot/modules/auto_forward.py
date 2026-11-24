@@ -3,22 +3,27 @@ from __future__ import annotations
 import logging
 import html
 from dataclasses import asdict
-from typing import Any
+from typing import Any, Callable
 
 from telegram_bot.config import AutoForwardConfig
-from telegram_bot.shared.telegram_io import safe_delete_message, safe_edit_message
+from telegram_bot.shared.telegram_io import get_reply_message, is_edited_event, safe_delete_message
 from telegram_bot.shared.contracts import HandlerResult
 
 from .base import ModuleCard
 
 logger = logging.getLogger(__name__)
+MAX_QUOTE_CONTENT_CHARS = 3500
 
 
 class AutoForwardModule:
     def __init__(self, card: ModuleCard, config: AutoForwardConfig) -> None:
         self.card = card
         self.config = config
+        self._programmatic_message_checker: Callable[[Any], bool] | None = None
         self._sync_card_config()
+
+    def set_programmatic_message_checker(self, checker: Callable[[Any], bool]) -> None:
+        self._programmatic_message_checker = checker
 
     async def start(self) -> None:
         self.card.status = "running"
@@ -27,10 +32,12 @@ class AutoForwardModule:
         self.card.status = "stopped"
 
     async def handle_message(self, event: Any) -> HandlerResult:
-        if not _is_outgoing(event):
+        if is_edited_event(event) or not _is_outgoing(event):
             return HandlerResult.ignored(self.card.id)
 
         message = _event_message(event)
+        if self._is_programmatic_message(message):
+            return HandlerResult.ignored(self.card.id)
         text = _message_text(message)
         mode = match_auto_forward_mode(text, self.config)
         if mode is None:
@@ -43,43 +50,51 @@ class AutoForwardModule:
             await _send_text(event, "\u8bf7\u56de\u590d\u4e00\u6761\u6d88\u606f\u540e\u518d\u53d1\u9001\u8f6c\u53d1\u547d\u4ee4\u3002", parse_mode="html")
             return HandlerResult.handled(self.card.id, "auto forward missing reply")
 
-        replied = await _get_reply_message(message)
+        replied = await get_reply_message(message)
         if replied is None:
             await _send_text(event, "\u672a\u80fd\u8bfb\u53d6\u88ab\u5f15\u7528\u6d88\u606f\u3002", parse_mode="html")
             return HandlerResult.handled(self.card.id, "auto forward reply unavailable")
 
         chat_id = getattr(message, "chat_id", getattr(event, "chat_id", None))
         client = getattr(event, "client", None)
-        if mode == "native":
-            if client is None or chat_id is None or not hasattr(client, "forward_messages"):
-                logger.warning("Auto forward skipped because Telegram client cannot forward messages")
-                return HandlerResult.failed(self.card.id, "Telegram client cannot forward messages")
-            await client.forward_messages(chat_id, replied)
-        elif mode == "copy_text":
-            if client is None or chat_id is None or not hasattr(client, "send_message"):
-                logger.warning("Auto forward skipped because Telegram client cannot send messages")
-                return HandlerResult.failed(self.card.id, "Telegram client cannot send messages")
-            content = _message_text(replied).strip()
-            if not content:
-                await _send_text(event, "\u590d\u5236\u6587\u672c\u6a21\u5f0f\u53ea\u80fd\u5904\u7406\u6709\u6587\u672c\u7684\u6d88\u606f\u3002", parse_mode="html")
-                return HandlerResult.handled(self.card.id, "auto forward copy text unavailable", {"mode": mode})
-            await client.send_message(chat_id, content)
-        elif mode == "quote":
-            if client is None or chat_id is None or not hasattr(client, "send_message"):
-                logger.warning("Auto forward skipped because Telegram client cannot send messages")
-                return HandlerResult.failed(self.card.id, "Telegram client cannot send messages")
-            await client.send_message(chat_id, await _format_quote_message(replied), parse_mode="html")
-        elif mode == "link":
-            if client is None or chat_id is None or not hasattr(client, "send_message"):
-                logger.warning("Auto forward skipped because Telegram client cannot send messages")
-                return HandlerResult.failed(self.card.id, "Telegram client cannot send messages")
-            link = await _public_message_link(event, replied)
-            if not link:
-                await _send_text(event, "\u8fd9\u6761\u6d88\u606f\u6ca1\u6709\u516c\u5f00\u53ef\u70b9\u51fb\u94fe\u63a5\u3002", parse_mode="html")
-                return HandlerResult.handled(self.card.id, "auto forward link unavailable", {"mode": mode})
-            await client.send_message(chat_id, link)
-        else:
-            return HandlerResult.ignored(self.card.id)
+        try:
+            if mode == "native":
+                if client is None or chat_id is None or not hasattr(client, "forward_messages"):
+                    logger.warning("Auto forward skipped because Telegram client cannot forward messages")
+                    return HandlerResult.failed(self.card.id, "Telegram client cannot forward messages")
+                await client.forward_messages(chat_id, replied)
+            elif mode == "copy_text":
+                if client is None or chat_id is None or not hasattr(client, "send_message"):
+                    logger.warning("Auto forward skipped because Telegram client cannot send messages")
+                    return HandlerResult.failed(self.card.id, "Telegram client cannot send messages")
+                content = _message_text(replied).strip()
+                if not content:
+                    await _send_text(event, "\u590d\u5236\u6587\u672c\u6a21\u5f0f\u53ea\u80fd\u5904\u7406\u6709\u6587\u672c\u7684\u6d88\u606f\u3002", parse_mode="html")
+                    return HandlerResult.handled(self.card.id, "auto forward copy text unavailable", {"mode": mode})
+                await client.send_message(chat_id, content)
+            elif mode == "quote":
+                if client is None or chat_id is None or not hasattr(client, "send_message"):
+                    logger.warning("Auto forward skipped because Telegram client cannot send messages")
+                    return HandlerResult.failed(self.card.id, "Telegram client cannot send messages")
+                await client.send_message(chat_id, await _format_quote_message(replied), parse_mode="html")
+            elif mode == "link":
+                if client is None or chat_id is None or not hasattr(client, "send_message"):
+                    logger.warning("Auto forward skipped because Telegram client cannot send messages")
+                    return HandlerResult.failed(self.card.id, "Telegram client cannot send messages")
+                link = await _public_message_link(event, replied)
+                if not link:
+                    await _send_text(event, "\u8fd9\u6761\u6d88\u606f\u6ca1\u6709\u516c\u5f00\u53ef\u70b9\u51fb\u94fe\u63a5\u3002", parse_mode="html")
+                    return HandlerResult.handled(self.card.id, "auto forward link unavailable", {"mode": mode})
+                await client.send_message(chat_id, link)
+            else:
+                return HandlerResult.ignored(self.card.id)
+        except Exception as exc:
+            logger.exception("Auto forward failed: mode=%s chat_id=%s", mode, chat_id)
+            try:
+                await _send_text(event, "\u8f6c\u53d1\u5931\u8d25\uff0c\u8bf7\u786e\u8ba4\u5f53\u524d\u4f1a\u8bdd\u6743\u9650\u6216\u6d88\u606f\u72b6\u6001\u3002")
+            except Exception:
+                pass
+            return HandlerResult.failed(self.card.id, str(exc))
 
         logger.info(
             "Auto forward handled: mode=%s chat_id=%s command_message_id=%s replied_message_id=%s",
@@ -97,6 +112,15 @@ class AutoForwardModule:
                 "mode": mode,
             },
         )
+
+    def _is_programmatic_message(self, message: Any) -> bool:
+        if self._programmatic_message_checker is None or message is None:
+            return False
+        try:
+            return bool(self._programmatic_message_checker(message))
+        except Exception:
+            logger.exception("Auto forward programmatic message check failed")
+            return False
 
     def update_config(self, values: dict[str, Any]) -> None:
         data = values.get("auto_forward", values)
@@ -163,12 +187,6 @@ def _is_outgoing(event: Any) -> bool:
     return bool(getattr(message, "out", getattr(event, "out", False)))
 
 
-async def _get_reply_message(message: Any) -> Any:
-    if message is None or not getattr(message, "is_reply", False) or not hasattr(message, "get_reply_message"):
-        return None
-    return await message.get_reply_message()
-
-
 async def _send_text(event: Any, text: str, parse_mode: str | None = None) -> Any:
     message = _event_message(event)
     client = getattr(event, "client", None)
@@ -184,6 +202,8 @@ async def _send_text(event: Any, text: str, parse_mode: str | None = None) -> An
 async def _format_quote_message(message: Any) -> str:
     sender = await _sender_display_name(message)
     content = _message_text(message).strip() or "\u975e\u6587\u672c\u6d88\u606f"
+    if len(content) > MAX_QUOTE_CONTENT_CHARS:
+        content = content[: MAX_QUOTE_CONTENT_CHARS - 1] + "\u2026"
     return f"\u6765\u81ea {html.escape(sender)}\n<blockquote expandable>{html.escape(content)}</blockquote>"
 
 

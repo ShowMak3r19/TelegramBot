@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
+import html
 import logging
+import re
 from collections import deque
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -13,6 +16,9 @@ logger = logging.getLogger(__name__)
 MessageCallback = Callable[[Any], Awaitable[None]]
 _PROGRAMMATIC_MESSAGE_HISTORY_LIMIT = 1024
 _TRACKED_CLIENT_METHODS = ("send_message", "send_file", "forward_messages", "edit_message")
+# Telethon 自动重连 5 次失败后会彻底断开且不再重试，由看门狗兜底
+_WATCHDOG_INTERVAL_SECONDS = 30.0
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
 @dataclass(frozen=True)
@@ -21,6 +27,7 @@ class _PendingProgrammaticOperation:
     method_name: str
     target: str | None
     text: str | None
+    plain_text: str | None = None
 
 
 class ProgrammaticMessageTracker:
@@ -37,11 +44,13 @@ class ProgrammaticMessageTracker:
         self._next_token += 1
         target = _operation_target(args, kwargs)
         text = _operation_text(method_name, args, kwargs)
+        plain_text = _plain_operation_text(text, kwargs.get("parse_mode"))
         self._pending[self._next_token] = _PendingProgrammaticOperation(
             self._next_token,
             method_name,
             target,
             text,
+            plain_text,
         )
         return self._next_token
 
@@ -100,6 +109,13 @@ class TelegramAdapter:
         self._programmatic_messages = ProgrammaticMessageTracker()
         self.connected = False
         self.last_error = ""
+        self.watchdog_interval = _WATCHDOG_INTERVAL_SECONDS
+        self._watchdog_task: asyncio.Task | None = None
+        self._reconnect_listeners: list[Callable[[], Any]] = []
+
+    def add_reconnect_listener(self, listener: Callable[[], Any]) -> None:
+        """看门狗重连成功后回调（断线期间的消息不会自动补发，需要的模块自行补漏）。"""
+        self._reconnect_listeners.append(listener)
 
     async def start(self) -> None:
         if not self.config.enabled:
@@ -145,6 +161,10 @@ class TelegramAdapter:
 
         @self.client.on(events.MessageEdited)
         async def _on_message_edited(event: Any) -> None:
+            try:
+                setattr(event, "_tgbot_edited", True)
+            except Exception:
+                pass
             await self._handle_monitored_event(event, "edited message")
 
         if self.config.bot_token:
@@ -153,6 +173,36 @@ class TelegramAdapter:
             await self.client.start()
         self.connected = True
         logger.info("Telegram adapter connected")
+        self._watchdog_task = asyncio.create_task(self._watchdog())
+
+    async def _watchdog(self) -> None:
+        while True:
+            await asyncio.sleep(self.watchdog_interval)
+            if self.client is None or self.client.is_connected():
+                continue
+            if self.connected:
+                logger.warning("Telegram connection lost; watchdog will reconnect")
+            self.connected = False
+            try:
+                await self.client.connect()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self.last_error = f"Reconnect failed: {exc}"
+                logger.warning("Telegram watchdog reconnect failed: %s", exc)
+                continue
+            if not self.client.is_connected():
+                continue
+            self.connected = True
+            self.last_error = ""
+            logger.info("Telegram adapter reconnected by watchdog")
+            for listener in list(self._reconnect_listeners):
+                try:
+                    result = listener()
+                    if asyncio.iscoroutine(result):
+                        await result
+                except Exception:
+                    logger.exception("Telegram reconnect listener failed")
 
     async def _handle_monitored_event(self, event: Any, event_name: str) -> None:
         if self._should_monitor(event):
@@ -160,6 +210,10 @@ class TelegramAdapter:
             await self.callback(event)
 
     async def stop(self) -> None:
+        if self._watchdog_task is not None:
+            self._watchdog_task.cancel()
+            await asyncio.gather(self._watchdog_task, return_exceptions=True)
+            self._watchdog_task = None
         if self.client is not None:
             await self.client.disconnect()
         self.connected = False
@@ -181,9 +235,7 @@ class TelegramAdapter:
             if not (is_group or megagroup or broadcast):
                 continue
 
-            chat_id = str(getattr(entity, "id", getattr(dialog, "id", "")))
-            if chat_id and not chat_id.startswith("-100") and (is_channel or megagroup or broadcast):
-                chat_id = f"-100{chat_id}"
+            chat_id = _dialog_peer_id(dialog, entity, is_group, is_channel, megagroup, broadcast)
             username = getattr(entity, "username", "") or ""
             targets = {chat_id}
             if username:
@@ -220,9 +272,7 @@ class TelegramAdapter:
             if not (is_group or megagroup or broadcast or is_bot):
                 continue
 
-            target_id = str(getattr(entity, "id", getattr(dialog, "id", "")))
-            if target_id and not target_id.startswith("-100") and (is_channel or megagroup or broadcast):
-                target_id = f"-100{target_id}"
+            target_id = _dialog_peer_id(dialog, entity, is_group, is_channel, megagroup, broadcast)
             username = getattr(entity, "username", "") or ""
             aliases = {target_id}
             if username:
@@ -248,6 +298,16 @@ class TelegramAdapter:
             entity = int(entity)
         message = await self.client.send_message(entity, text, parse_mode=parse_mode)
         logger.info("Telegram message sent: target=%s text=%s", target, _preview_text(text, 120))
+        return message
+
+    async def send_file(self, target: str, path: Path, caption: str = "") -> Any:
+        if not self.client or not self.connected:
+            raise RuntimeError("Telegram client is not connected")
+        entity: Any = target.strip()
+        if _looks_like_int(entity):
+            entity = int(entity)
+        message = await self.client.send_file(entity, str(path), caption=caption, force_document=True)
+        logger.info("Telegram file sent: target=%s file=%s", target, Path(path).name)
         return message
 
     async def iter_history_messages(self, target: str, *, min_id: int = 0) -> AsyncIterator[Any]:
@@ -312,7 +372,15 @@ class TelegramAdapter:
         if not groups:
             return True
         chat_id = str(getattr(event, "chat_id", ""))
-        return chat_id in groups
+        if chat_id in groups:
+            return True
+        chat = getattr(event, "chat", None) or getattr(getattr(event, "message", None), "chat", None)
+        username = str(getattr(chat, "username", "") or "").strip()
+        if username:
+            lowered = {item.lstrip("@").lower() for item in groups if not _looks_like_int(item)}
+            if username.lower() in lowered:
+                return True
+        return False
 
     def _log_monitored_message(self, event: Any, event_name: str = "message") -> None:
         message = getattr(event, "message", event)
@@ -321,7 +389,7 @@ class TelegramAdapter:
         sender_id = getattr(message, "sender_id", getattr(event, "sender_id", ""))
         text = _preview_message_text(message)
         has_media = bool(getattr(message, "media", None))
-        logger.info(
+        logger.debug(
             "Monitored Telegram %s: chat_id=%s sender_id=%s message_id=%s out=%s media=%s text=%s",
             event_name,
             chat_id,
@@ -398,18 +466,50 @@ def _message_text(message: Any) -> str:
     return str(getattr(message, "raw_text", getattr(message, "message", "")) or "")
 
 
+def _dialog_peer_id(
+    dialog: Any,
+    entity: Any,
+    is_group: bool,
+    is_channel: bool,
+    megagroup: bool,
+    broadcast: bool,
+) -> str:
+    raw = getattr(dialog, "id", None)
+    if raw is None:
+        raw = getattr(entity, "id", "")
+    peer_id = str(raw or "").strip()
+    if not peer_id:
+        return ""
+    if is_channel or megagroup or broadcast:
+        if not peer_id.startswith("-100"):
+            peer_id = f"-100{peer_id.lstrip('-')}"
+    elif is_group and not peer_id.startswith("-"):
+        peer_id = f"-{peer_id}"
+    return peer_id
+
+
+def _plain_operation_text(text: str | None, parse_mode: Any) -> str | None:
+    if text is None:
+        return None
+    mode = str(parse_mode or "").strip().lower()
+    if mode in {"html", "htm"}:
+        return html.unescape(_HTML_TAG_RE.sub("", text))
+    return None
+
+
 def _pending_operation_matches_message(
     pending: _PendingProgrammaticOperation,
     message: Any,
     text: str,
 ) -> bool:
+    candidates = [item for item in (pending.text, pending.plain_text) if item is not None]
     if pending.method_name == "send_file":
-        if pending.text is None or getattr(message, "media", None) is None:
+        if not candidates or getattr(message, "media", None) is None:
             return False
-        return text == pending.text
+        return text in candidates
     if pending.method_name == "forward_messages":
         return False
-    return pending.text is not None and text == pending.text
+    return bool(candidates) and text in candidates
 
 
 def _normalise_chat_id(value: Any) -> str | None:

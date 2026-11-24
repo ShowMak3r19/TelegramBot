@@ -72,6 +72,9 @@ def build_quote_payload(messages: list[dict[str, Any]], config: Any) -> dict[str
     }
 
 
+_MAX_QUOTE_RESPONSE_BYTES = 32 * 1024 * 1024
+
+
 def generate_quote_sync(api_url: str, payload: dict[str, Any], timeout: float) -> bytes:
     """同步 POST quote-api，返回图片字节。请在 asyncio.to_thread 中调用以免阻塞事件循环。"""
     url = ensure_http_url(api_url)
@@ -83,7 +86,10 @@ def generate_quote_sync(api_url: str, payload: dict[str, Any], timeout: float) -
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
-        return response.read()
+        data = response.read(_MAX_QUOTE_RESPONSE_BYTES + 1)
+    if len(data) > _MAX_QUOTE_RESPONSE_BYTES:
+        raise ValueError("quote-api 返回图片超过大小上限")
+    return data
 
 
 # ---- 返回内容的格式检测：决定按静态还是动态贴纸发送 ----

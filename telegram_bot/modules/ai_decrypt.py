@@ -3,7 +3,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
+import re
 import time
+import uuid
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -27,7 +30,9 @@ from telegram_bot.shared.ai_messages import (
     make_async_anthropic_client,
 )
 from telegram_bot.shared.telegram_io import (
+    atomic_write_text,
     event_message as _event_message,
+    is_edited_event as _is_edited_event,
     is_outgoing as _is_outgoing,
     message_text as _message_text,
 )
@@ -74,6 +79,8 @@ class AIDecryptModule:
     async def handle_message(self, event: Any) -> HandlerResult:
         if _is_outgoing(event):
             return HandlerResult.ignored(self.card.id)
+        if _is_edited_event(event):
+            return HandlerResult.ignored(self.card.id)
 
         message = _event_message(event)
         text = _message_text(message or event)
@@ -97,7 +104,7 @@ class AIDecryptModule:
             return HandlerResult.ignored(self.card.id)
 
         try:
-            image_inputs, media_error = await collect_image_inputs_for_responses(event, "")
+            image_inputs, media_error = await collect_image_inputs_for_responses(event, "", include_reply_media=False)
             if media_error:
                 logger.warning("AI decrypt media input hint: %s", media_error)
             if template.require_media and not image_inputs:
@@ -112,12 +119,14 @@ class AIDecryptModule:
                 logger.warning("AI decrypt answer looked like a command, skipped: %s", answer[:120])
                 return HandlerResult.ignored(self.card.id)
 
-            self._mark_claimed(template.id, puzzle_id)
             delay_seconds = max(0, int(self.config.send_delay_ms or 0)) / 1000
             if delay_seconds:
                 logger.info("AI decrypt send delayed: template=%s id=%s delay_ms=%s", template.id, puzzle_id, self.config.send_delay_ms)
                 await asyncio.sleep(delay_seconds)
+            if self.card.status == "stopped":
+                return HandlerResult.ignored(self.card.id)
             await respond_to_message(event, answer)
+            self._mark_claimed(template.id, puzzle_id)
             logger.info("AI decrypt answer sent: template=%s id=%s answer=%s", template.id, puzzle_id, answer[:120])
             return HandlerResult.handled(
                 self.card.id,
@@ -175,7 +184,9 @@ class AIDecryptModule:
         if not provider.model:
             raise ValueError("AI 解密需要配置 AI 服务模型")
 
-        client = AsyncOpenAI(api_key=provider.api_key, base_url=provider.base_url.rstrip("/"), timeout=self.config.timeout_seconds)
+        client_kwargs: dict[str, Any] = {"api_key": provider.api_key, "timeout": self.config.timeout_seconds}
+        if provider.base_url.strip():
+            client_kwargs["base_url"] = provider.base_url.rstrip("/")
         user_content: list[dict[str, Any]] = [{"type": "input_text", "text": text.strip()}]
         for image_input in image_inputs:
             image_url = image_input.get("url", "")
@@ -191,6 +202,7 @@ class AIDecryptModule:
         }
         logger.info("AI decrypt request started template=%s model=%s images=%s", template.id, provider.model, len(image_inputs))
         started_at = time.monotonic()
+        client = AsyncOpenAI(**client_kwargs)
         try:
             response = await client.responses.create(**request_kwargs)
             self._record_ai_usage("ai_decrypt", "responses", provider.model, True, started_at, response)
@@ -222,7 +234,6 @@ class AIDecryptModule:
         client_kwargs: dict[str, Any] = {"api_key": provider.api_key, "timeout": self.config.timeout_seconds}
         if provider.base_url.strip():
             client_kwargs["base_url"] = provider.base_url.rstrip("/")
-        client = AsyncOpenAI(**client_kwargs)
         request_kwargs = {
             "model": provider.model,
             "messages": build_openai_chat_messages(
@@ -239,6 +250,7 @@ class AIDecryptModule:
             len(image_inputs),
         )
         started_at = time.monotonic()
+        client = AsyncOpenAI(**client_kwargs)
         try:
             response = await client.chat.completions.create(**request_kwargs)
             self._record_ai_usage("ai_decrypt", "chat_completions", provider.model, True, started_at, response)
@@ -260,7 +272,6 @@ class AIDecryptModule:
         if not provider.model:
             raise ValueError("AI 解密需要配置 AI 服务模型")
 
-        client = make_async_anthropic_client(provider.api_key, provider.base_url, self.config.timeout_seconds)
         # 与 OpenAI 路径一致：只发送原始题面文本与图片，不下发模板 prompt。
         user_content: list[dict[str, Any]] = [{"type": "text", "text": text.strip()}]
         for image_input in image_inputs:
@@ -274,6 +285,7 @@ class AIDecryptModule:
         }
         logger.info("AI decrypt request started template=%s model=%s images=%s provider=anthropic", template.id, provider.model, len(image_inputs))
         started_at = time.monotonic()
+        client = make_async_anthropic_client(provider.api_key, provider.base_url, self.config.timeout_seconds)
         try:
             message = await anthropic_create_message(client, request_kwargs)
             self._record_ai_usage("ai_decrypt", "messages", provider.model, True, started_at, message)
@@ -294,7 +306,12 @@ class AIDecryptModule:
                 if isinstance(item, dict)
             ]
         if "timeout_seconds" in values:
-            self.config.timeout_seconds = max(5.0, float(values.get("timeout_seconds") or 120.0))
+            try:
+                parsed = float(values.get("timeout_seconds") or 120.0)
+                if math.isfinite(parsed):
+                    self.config.timeout_seconds = max(5.0, min(parsed, 600.0))
+            except (TypeError, ValueError):
+                pass
         if "max_tokens" in values:
             self.config.max_tokens = max(16, min(int(values.get("max_tokens") or 512), 4096))
         if "image_detail" in values:
@@ -302,9 +319,12 @@ class AIDecryptModule:
         if "send_delay_ms" in values:
             self.config.send_delay_ms = max(0, min(int(values.get("send_delay_ms") or 0), 60_000))
         if "state_store" in values:
-            self.config.state_store = str(values.get("state_store") or "runtime/data/ai_decrypt_claimed_ids.json")
-            self.state_path = self._resolve_path(self.config.state_store)
-            self.claimed_ids = self._load_claimed_ids()
+            new_store = str(values.get("state_store") or "runtime/data/ai_decrypt_claimed_ids.json")
+            new_path = self._resolve_path(new_store)
+            self.config.state_store = new_store
+            if new_path != self.state_path:
+                self.state_path = new_path
+                self.claimed_ids = self._load_claimed_ids()
         self._sync_card_config()
         logger.info("AI decrypt config updated: templates=%s delay_ms=%s", self._enabled_template_count(), self.config.send_delay_ms)
 
@@ -371,9 +391,8 @@ class AIDecryptModule:
     def _save_claimed_ids(self) -> None:
         if self.state_path is None:
             return
-        self.state_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {"version": 1, "ttl_seconds": CLAIM_TTL_SECONDS, "templates": self.claimed_ids}
-        self.state_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        atomic_write_text(self.state_path, json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
     def _sync_card_config(self) -> None:
         self.card.config = {
@@ -442,7 +461,8 @@ async def respond_to_message(event: Any, answer: str) -> None:
 def sanitize_answer(value: str) -> str:
     value = str(value or "").strip()
     if value.startswith("```"):
-        value = value.strip("`").strip()
+        value = re.sub(r"^```[A-Za-z0-9_+-]*\s*", "", value)
+        value = re.sub(r"\s*```$", "", value).strip()
     for prefix in ("答案：", "答案:", "最终答案：", "最终答案:"):
         if value.startswith(prefix):
             value = value[len(prefix) :].strip()
@@ -451,7 +471,7 @@ def sanitize_answer(value: str) -> str:
 
 def template_from_dict(data: dict[str, Any]) -> AIDecryptTemplateConfig:
     return AIDecryptTemplateConfig(
-        id=str(data.get("id") or "").strip(),
+        id=str(data.get("id") or "").strip() or f"decrypt_{uuid.uuid4().hex[:8]}",
         name=str(data.get("name") or "").strip(),
         enabled=bool(data.get("enabled", True)),
         trigger_keywords=clean_list(data.get("trigger_keywords")),
@@ -475,12 +495,12 @@ def extract_after_marker(text: str, marker: str) -> str:
     marker = marker.strip()
     if not marker:
         return ""
-    marker_folded = marker.casefold()
+    pattern = re.compile(re.escape(marker), re.IGNORECASE)
     for line in text.splitlines():
-        position = line.casefold().find(marker_folded)
-        if position < 0:
+        match = pattern.search(line)
+        if not match:
             continue
-        return line[position + len(marker) :].strip().lstrip(" \t:：").strip()
+        return line[match.end() :].strip().lstrip(" \t:：").strip()
     return ""
 
 

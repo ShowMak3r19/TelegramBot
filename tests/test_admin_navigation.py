@@ -12,33 +12,6 @@ from telegram_bot.config import AppConfig
 from telegram_bot.modules import create_default_registry
 
 
-def test_admin_sections_are_balanced_and_panels_belong_to_views() -> None:
-    from html.parser import HTMLParser
-
-    class SectionParser(HTMLParser):
-        def __init__(self):
-            super().__init__()
-            self.stack = []
-
-        def handle_starttag(self, tag, attrs):
-            if tag != "section":
-                return
-            values = dict(attrs)
-            classes = values.get("class", "").split()
-            if "panel" in classes:
-                assert any("view" in parent for parent in self.stack)
-            self.stack.append(classes)
-
-        def handle_endtag(self, tag):
-            if tag == "section":
-                assert self.stack, "Unexpected closing section"
-                self.stack.pop()
-
-    parser = SectionParser()
-    parser.feed((ROOT / "telegram_bot/admin/static/index.html").read_text(encoding="utf-8"))
-    assert not parser.stack
-
-
 def _module_view_map(app_js: str) -> dict[str, str]:
     match = re.search(r"const moduleViewMap = \{(?P<body>.*?)\};", app_js, re.S)
     assert match is not None, "moduleViewMap is missing from admin app.js"
@@ -69,8 +42,6 @@ def test_admin_sidebar_covers_registered_feature_modules() -> None:
         if f'id="{module_views[module_id]}"' not in index_html
     ]
     assert missing_sections == []
-
-
 
 
 def test_user_profile_admin_view_has_navigation_config_and_privacy_copy() -> None:
@@ -159,3 +130,46 @@ def test_red_packet_admin_pre_click_controls_preserve_message_lines() -> None:
     for field in ("send_message_before_click", "delay_before_click"):
         assert f'data-field="{field}"' in app_js
         assert f'{field}: card.querySelector(\'[data-field="{field}"]\').checked' in app_js
+
+
+def test_admin_topbar_branding_version_and_service_icon() -> None:
+    admin_static = ROOT / "telegram_bot" / "admin" / "static"
+    index_html = (admin_static / "index.html").read_text(encoding="utf-8")
+    app_js = (admin_static / "app.js").read_text(encoding="utf-8")
+
+    assert "<strong>Telebot</strong>" in index_html
+    assert 'id="sidebarVersion"' not in index_html
+    assert 'id="navModulesBadge"' not in index_html
+    assert 'id="openAppearanceBtn"' not in index_html
+    assert 'id="topbarVersion"' in index_html
+    assert 'id="serviceMenuToggle"' in index_html
+    assert 'data-icon="power"' in index_html
+    assert "power:" in app_js
+    assert 'document.getElementById("topbarVersion")' in app_js
+
+
+def test_admin_sections_are_balanced_and_panels_belong_to_views() -> None:
+    from html.parser import HTMLParser
+
+    class SectionParser(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.stack = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag != "section":
+                return
+            values = dict(attrs)
+            classes = values.get("class", "").split()
+            if "panel" in classes:
+                assert any("view" in parent for parent in self.stack)
+            self.stack.append(classes)
+
+        def handle_endtag(self, tag):
+            if tag == "section":
+                assert self.stack, "Unexpected closing section"
+                self.stack.pop()
+
+    parser = SectionParser()
+    parser.feed((ROOT / "telegram_bot/admin/static/index.html").read_text(encoding="utf-8"))
+    assert not parser.stack

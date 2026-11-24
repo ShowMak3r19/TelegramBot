@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 from pathlib import Path
 
 from .app import TelegramBotApplication
@@ -9,11 +10,11 @@ from .config import AppConfig
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="TelegramBot service")
+    parser = argparse.ArgumentParser(description="Telebot service")
     parser.add_argument(
         "--config",
-        default="config.json",
-        help="Path to runtime config JSON. Defaults to ./config.json.",
+        default=os.getenv("TGBOT_CONFIG", "config.json"),
+        help="Path to runtime config JSON. Defaults to TGBOT_CONFIG or ./config.json.",
     )
     parser.add_argument(
         "--init-config",

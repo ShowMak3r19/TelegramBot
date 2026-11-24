@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
 import signal
 import sys
 import time
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 from .admin import AdminServer
 from .config import AIProviderConfig, AppConfig
@@ -20,6 +21,7 @@ from .runtime import RuntimeMetrics, ensure_runtime_dirs, system_snapshot
 from .telegram import TelegramAdapter
 from .usage import build_ai_usage_stats
 
+T = TypeVar("T")
 logger = logging.getLogger(__name__)
 
 
@@ -39,13 +41,32 @@ class TelegramBotApplication:
             self.telegram,
             self.chat_history,
         )
+        send_red_packet = self.modules.get("send_red_packet")
+        if send_red_packet is not None:
+            send_red_packet.set_history_reader(self.telegram.iter_history_messages)
+            self.telegram.add_reconnect_listener(send_red_packet.request_claim_recovery)
         checkin = self.modules.get("checkin")
         if checkin is not None and hasattr(checkin, "set_sender"):
             checkin.set_sender(self.telegram.send_message)
+        for module in self.modules.all():
+            if hasattr(module, "set_programmatic_message_checker"):
+                module.set_programmatic_message_checker(self.telegram.is_programmatic_message)
+        magnet_import = self.modules.get("magnet_import")
+        if magnet_import is not None and hasattr(magnet_import, "set_history_reader"):
+            magnet_import.set_history_reader(self.telegram.iter_history_messages)
+        if magnet_import is not None and hasattr(magnet_import, "set_file_sender"):
+            magnet_import.set_file_sender(self.telegram.send_file)
+        if magnet_import is not None and hasattr(magnet_import, "request_channel_scan"):
+            # 断线期间的频道消息收不到，重连后从游标补漏
+            self.telegram.add_reconnect_listener(lambda: magnet_import.request_channel_scan(full=False))
+        rex_widget_sync = self.modules.get("rex_widget_sync")
+        if rex_widget_sync is not None and hasattr(rex_widget_sync, "set_history_reader"):
+            rex_widget_sync.set_history_reader(self.telegram.iter_history_messages)
         self.admin = AdminServer(self)
         self.loop: asyncio.AbstractEventLoop | None = None
         self.service_state = "starting"
         self.dashboard_history: list[dict[str, float]] = []
+        self._restarting = False
 
     async def run_forever(self) -> None:
         self.loop = asyncio.get_running_loop()
@@ -84,7 +105,17 @@ class TelegramBotApplication:
         logger.info("Core service stopped")
 
     async def restart_service(self) -> None:
+        if getattr(self, "_restarting", False):
+            logger.warning("Service restart already in progress; ignoring duplicate request")
+            return
+        self._restarting = True
         await self.stop_service()
+        chat_history = getattr(self, "chat_history", None)
+        if chat_history is not None and hasattr(chat_history, "close"):
+            try:
+                chat_history.close()
+            except Exception:
+                logger.exception("Failed to close chat history before restart")
         argv = [sys.executable, "-m", "telegram_bot", "--config", str(self.config_path)]
         logger.warning("Replacing the Python process for a full service restart")
         for handler in logging.getLogger().handlers:
@@ -95,6 +126,7 @@ class TelegramBotApplication:
         try:
             os.execv(sys.executable, argv)
         except OSError:
+            self._restarting = False
             logger.exception("Full service restart failed; restoring the stopped service")
             await self.start_service()
             raise
@@ -125,15 +157,23 @@ class TelegramBotApplication:
             logger.exception("Failed to archive monitored Telegram message text")
         try:
             results = await self.modules.dispatch_message(event)
-            if results:
+            active_results = [result for result in results if result.status != "ignored"]
+            if active_results:
                 logger.info(
+                    "Telegram message module results: %s",
+                    ", ".join(f"{result.module_id}={result.status}" for result in active_results),
+                )
+            elif results:
+                logger.debug(
                     "Telegram message module results: %s",
                     ", ".join(f"{result.module_id}={result.status}" for result in results),
                 )
             else:
-                logger.info("Telegram message matched no enabled module")
+                logger.debug("Telegram message matched no enabled module")
             if any(result.status == "handled" for result in results):
                 self.metrics.messages_handled += 1
+            if any(result.status == "failed" for result in results):
+                self.metrics.failures += 1
         except Exception:
             self.metrics.failures += 1
             logger.exception("Telegram message dispatch failed")
@@ -194,7 +234,50 @@ class TelegramBotApplication:
             data_dir = self.project_root / data_dir
         return build_ai_usage_stats(data_dir / "ai_usage.jsonl", range_key)
 
+    def _call_on_loop(self, fn: Callable[[], T], *, timeout: float = 15.0) -> T:
+        loop = getattr(self, "loop", None)
+        if loop is None or not loop.is_running():
+            return fn()
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if running is loop:
+            return fn()
+
+        async def _invoke() -> T:
+            return fn()
+
+        return asyncio.run_coroutine_threadsafe(_invoke(), loop).result(timeout=timeout)
+
+    def _schedule_module_action(self, module_id: str, action: Callable[[], Any]) -> None:
+        loop = getattr(self, "loop", None)
+        if not loop or self.service_state != "running":
+            return
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if running is loop:
+            task = asyncio.create_task(action())
+            task.add_done_callback(lambda fut: _log_task_error(module_id, fut))
+        else:
+            future = asyncio.run_coroutine_threadsafe(action(), loop)
+            future.add_done_callback(lambda fut: _log_task_error(module_id, fut))
+
+    def module_statistics_snapshot(self, module_id: str) -> dict[str, Any] | None:
+        def _read() -> dict[str, Any] | None:
+            module = self.modules.get(module_id)
+            if module is None or not hasattr(module, "statistics_snapshot"):
+                return None
+            return module.statistics_snapshot()
+
+        return self._call_on_loop(_read)
+
     def update_ai_config(self, values: dict[str, Any]) -> dict[str, Any]:
+        return self._call_on_loop(lambda: self._update_ai_config_sync(values))
+
+    def _update_ai_config_sync(self, values: dict[str, Any]) -> dict[str, Any]:
         ai = values.get("ai", values)
         if not isinstance(ai, dict):
             return self.ai_snapshot()
@@ -232,17 +315,63 @@ class TelegramBotApplication:
         future = asyncio.run_coroutine_threadsafe(self.telegram.list_targets(), self.loop)
         return future.result(timeout=30)
 
+    def request_magnet_channel_scan(self, full: bool, rebuild: bool = False) -> bool:
+        module = self.modules.get("magnet_import")
+        if not self.loop or module is None or not hasattr(module, "request_channel_scan"):
+            return False
+        if not self.telegram.connected:
+            return False
+
+        async def _request() -> bool:
+            return module.request_channel_scan(full=full, rebuild=rebuild)
+
+        return asyncio.run_coroutine_threadsafe(_request(), self.loop).result(timeout=10)
+
+    def request_rex_widget_scan(self, full: bool) -> bool:
+        module = self.modules.get("rex_widget_sync")
+        if not self.loop or module is None or not hasattr(module, "request_scan"):
+            return False
+        if not self.telegram.connected:
+            return False
+
+        async def _request() -> bool:
+            return module.request_scan(full=full)
+
+        return asyncio.run_coroutine_threadsafe(_request(), self.loop).result(timeout=10)
+
+    def request_magnet_avdb_run(self, force: bool, rebuild: bool, update_existing: bool = False) -> bool:
+        module = self.modules.get("magnet_import")
+        if not self.loop or module is None or not hasattr(module, "request_avdb_run"):
+            return False
+
+        async def _request() -> bool:
+            return module.request_avdb_run(force=force, rebuild=rebuild, update_existing=update_existing)
+
+        return asyncio.run_coroutine_threadsafe(_request(), self.loop).result(timeout=10)
+
+    def run_magnet_channel_export(self) -> dict[str, Any]:
+        module = self.modules.get("magnet_import")
+        if not self.loop or module is None or not hasattr(module, "run_channel_export"):
+            return {"status": "failed", "detail": "模块不可用"}
+        return asyncio.run_coroutine_threadsafe(module.run_channel_export(), self.loop).result(timeout=600)
+
     def update_settings(self, values: dict[str, Any]) -> None:
-        telegram = values.get("telegram", {})
-        if isinstance(telegram, dict) and "monitored_groups" in telegram:
-            groups = telegram["monitored_groups"]
-            if isinstance(groups, list):
-                meta = telegram.get("monitored_group_meta")
-                self.telegram.update_monitored_groups(groups, meta if isinstance(meta, dict) else None)
-        self.config.save(self.config_path)
-        logger.info("Settings updated from admin UI")
+        def _apply() -> None:
+            telegram = values.get("telegram", {})
+            if isinstance(telegram, dict) and "monitored_groups" in telegram:
+                groups = telegram["monitored_groups"]
+                if isinstance(groups, list):
+                    meta = telegram.get("monitored_group_meta")
+                    self.telegram.update_monitored_groups(groups, meta if isinstance(meta, dict) else None)
+            self.config.save(self.config_path)
+            logger.info("Settings updated from admin UI")
+
+        self._call_on_loop(_apply)
 
     def update_module(self, module_id: str, values: dict[str, Any]) -> dict[str, Any] | None:
+        return self._call_on_loop(lambda: self._update_module_sync(module_id, values))
+
+    def _update_module_sync(self, module_id: str, values: dict[str, Any]) -> dict[str, Any] | None:
         module = self.modules.get(module_id)
         if module is None:
             return None
@@ -256,9 +385,8 @@ class TelegramBotApplication:
                 self.config.ai.reply_provider.enabled = enabled
             elif module_id == "ai_image":
                 self.config.ai.image_provider.enabled = enabled
-            if self.loop and self.service_state == "running":
-                action = module.start if enabled else module.stop
-                asyncio.run_coroutine_threadsafe(action(), self.loop)
+            action = module.start if enabled else module.stop
+            self._schedule_module_action(module_id, action)
 
         if "config" in values and isinstance(values["config"], dict):
             module.update_config(values["config"])
@@ -284,6 +412,8 @@ class TelegramBotApplication:
                 self.config.chat_games = module.config
             if module_id == "magnet_import" and hasattr(module, "config"):
                 self.config.magnet_import = module.config
+            if module_id == "rex_widget_sync" and hasattr(module, "config"):
+                self.config.rex_widget_sync = module.config
 
         self.config.save(self.config_path)
         logger.info("Module updated: %s", module_id)
@@ -346,6 +476,9 @@ class TelegramBotApplication:
             decrypt._sync_card_config()
 
     def _sync_runtime_ai_settings_from_modules(self) -> None:
+        reply = self.modules.get("ai_reply")
+        if reply and hasattr(reply, "reload_runtime_settings"):
+            reply.reload_runtime_settings()
         image = self.modules.get("ai_image")
         if image and hasattr(image, "reload_runtime_settings"):
             image.reload_runtime_settings()
@@ -358,11 +491,21 @@ class TelegramBotApplication:
             if isinstance(values.get(key), list):
                 setattr(self.config.ai.reply, key, [str(item).strip() for item in values[key] if str(item).strip()])
         for key in ("context_limit", "max_tokens"):
-            if key in values:
-                setattr(self.config.ai.reply, key, int(values.get(key) or 0))
+            if key in values and values.get(key) is not None and values.get(key) != "":
+                parsed_int = int(values[key])
+                if parsed_int < 0:
+                    raise ValueError(f"{key} 不能为负数")
+                setattr(self.config.ai.reply, key, parsed_int)
         for key in ("timeout_seconds", "temperature"):
-            if key in values:
-                setattr(self.config.ai.reply, key, float(values.get(key) or 0))
+            if key in values and values.get(key) is not None and values.get(key) != "":
+                parsed_float = float(values[key])
+                if not math.isfinite(parsed_float):
+                    raise ValueError(f"{key} 必须为有限数字")
+                if key == "timeout_seconds":
+                    parsed_float = max(5.0, min(parsed_float, 600.0))
+                else:
+                    parsed_float = max(0.0, min(parsed_float, 2.0))
+                setattr(self.config.ai.reply, key, parsed_float)
         for key in ("reasoning_summary", "web_search", "message_info_enabled"):
             if key in values:
                 setattr(self.config.ai.reply, key, bool(values[key]))
@@ -374,8 +517,11 @@ class TelegramBotApplication:
         for key in ("command_prefixes", "size_commands", "ratio_commands", "send_mode_commands", "model_commands"):
             if isinstance(values.get(key), list):
                 setattr(self.config.ai.image, key, [str(item).strip() for item in values[key] if str(item).strip()])
-        if "timeout_seconds" in values:
-            self.config.ai.image.timeout_seconds = float(values.get("timeout_seconds") or 0)
+        if "timeout_seconds" in values and values.get("timeout_seconds") is not None and values.get("timeout_seconds") != "":
+            parsed = float(values["timeout_seconds"])
+            if not math.isfinite(parsed):
+                raise ValueError("timeout_seconds 必须为有限数字")
+            self.config.ai.image.timeout_seconds = max(5.0, min(parsed, 600.0))
 
     def _apply_ai_module_runtime_changes(self, previous_enabled: dict[str, bool]) -> None:
         if not self.loop or self.service_state != "running":
@@ -385,7 +531,7 @@ class TelegramBotApplication:
             if module is None or bool(module.card.enabled) == was_enabled:
                 continue
             action = module.start if module.card.enabled else module.stop
-            asyncio.run_coroutine_threadsafe(action(), self.loop)
+            self._schedule_module_action(module_id, action)
 
     def _install_signal_handlers(self) -> None:
         loop = asyncio.get_running_loop()
@@ -396,3 +542,12 @@ class TelegramBotApplication:
                 loop.add_signal_handler(sig, lambda: asyncio.create_task(self.shutdown()))
             except NotImplementedError:
                 pass
+
+
+def _log_task_error(module_id: str, future: Any) -> None:
+    try:
+        exc = future.exception()
+    except Exception:
+        return
+    if exc is not None:
+        logger.error("Module lifecycle action failed: %s", module_id, exc_info=exc)

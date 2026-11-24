@@ -586,6 +586,191 @@ def test_math_quiz_concurrent_correct_answers_settle_once(tmp_path: Path) -> Non
     assert len(client.edits) == 1
 
 
+
+def test_send_red_packet_cleans_copied_passphrase_on_creation(tmp_path: Path) -> None:
+    client = FakeClient()
+    module = make_module(tmp_path)
+    create = FakeEvent(FakeMessage(
+        f"{RED_PACKET} 300 2 \ufeffhello\u200b   world \u200b\u200b\u200b",
+        out=True, sender_id="self", sender_name="Owner", message_id=1,
+    ), client)
+    asyncio.run(module.handle_message(create))
+    packet = next(iter(module.active_packets.values()))
+    assert packet.passphrase == "hello world"
+    assert "<code>hello world</code>" in str(client.sent[0]["text"])
+
+
+def test_send_red_packet_existing_hidden_passphrase_survives_reload(tmp_path: Path) -> None:
+    client = FakeClient()
+    module = make_module(tmp_path)
+    create = FakeEvent(FakeMessage(
+        f"{RED_PACKET} 300 3 hello world", out=True,
+        sender_id="self", sender_name="Owner", message_id=1,
+    ), client)
+    asyncio.run(module.handle_message(create))
+    packet = next(iter(module.active_packets.values()))
+    packet.passphrase = "hello world \u200b\u200b\u200b"
+    module._save_state()
+    module = make_module(tmp_path)
+    for index, text in enumerate(["hello world", "\ufeffhello\u200b\n  world\u2060"], 2):
+        event = FakeEvent(FakeMessage(
+            text, out=False, sender_id=f"u{index}", sender_name="User", message_id=index,
+        ), client)
+        result = asyncio.run(module.handle_message(event))
+        assert result.status == "handled"
+        assert client.sent[-1]["kwargs"] == {"reply_to": index}
+    duplicate = FakeEvent(FakeMessage(
+        "hello world", out=False, sender_id="u2", sender_name="User", message_id=4,
+    ), client)
+    assert asyncio.run(module.handle_message(duplicate)).status == "ignored"
+    assert len(next(iter(module.active_packets.values())).claims) == 2
+    assert sum(str(item["text"]).startswith("+") for item in client.sent) == 2
+
+
+def test_send_red_packet_rejects_invisible_only_passphrase(tmp_path: Path) -> None:
+    client = FakeClient()
+    module = make_module(tmp_path)
+    create = FakeEvent(FakeMessage(
+        f"{RED_PACKET} 100 1 \u200b\ufeff\u2060", out=True,
+        sender_id="self", sender_name="Owner", message_id=1,
+    ), client)
+    result = asyncio.run(module.handle_message(create))
+    assert "error" in result.metadata
+    assert not module.active_packets
+
+
+def test_send_red_packet_normalization_preserves_meaningful_text(tmp_path: Path) -> None:
+    client = FakeClient()
+    module = make_module(tmp_path)
+    create = FakeEvent(FakeMessage(
+        f"{RED_PACKET} 300 2 A B \U0001f469\u200d\U0001f4bb \u2764\ufe0f",
+        out=True, sender_id="self", sender_name="Owner", message_id=1,
+    ), client)
+    asyncio.run(module.handle_message(create))
+    packet = next(iter(module.active_packets.values()))
+    assert packet.passphrase == "A B \U0001f469\u200d\U0001f4bb \u2764\ufe0f"
+    for wrong in ["a B \U0001f469\u200d\U0001f4bb \u2764\ufe0f", "AB \U0001f469\u200d\U0001f4bb \u2764\ufe0f",
+                  "A B \U0001f469\U0001f4bb \u2764\ufe0f", "A B \U0001f469\u200d\U0001f4bb \u2764\ufe0f extra"]:
+        assert not send_red_packet_module.is_packet_claim_text(packet, wrong)
+    packet.passphrase = "\u200b"
+    assert not send_red_packet_module.is_packet_claim_text(packet, "\u200b")
+
+
+def test_send_red_packet_recovers_offline_claims_once(tmp_path: Path) -> None:
+    client = FakeClient()
+    module = make_module(tmp_path)
+    asyncio.run(module.handle_message(FakeEvent(FakeMessage(
+        f"{RED_PACKET} 1000 4 {PASS}", out=True, sender_id="self", sender_name="Owner", message_id=1,
+    ), client)))
+    asyncio.run(module.handle_message(FakeEvent(FakeMessage(
+        PASS, out=False, sender_id="paid", sender_name="Paid", message_id=101,
+    ), client)))
+    module = make_module(tmp_path)
+    calls = []
+
+    def message(text, sender, message_id, *, out=False, chat_id=-1001):
+        value = FakeMessage(text, out=out, sender_id=sender, sender_name=sender,
+                            message_id=message_id, chat_id=chat_id)
+        value.client = client
+        return value
+
+    history = [
+        message(PASS, "too_early", 99),
+        message(PASS, "paid", 101),
+        message(PASS + "\u200b", "offline_one", 102),
+        message(PASS, "offline_two", 103),
+        message(PASS, "offline_one", 104),
+        message(PASS, "other_chat", 105, chat_id=-2002),
+        message(PASS, "self", 106),
+        message(f"{RED_PACKET} 100 1 new", "self", 107, out=True),
+        message("wrong", "wrong", 108),
+    ]
+
+    async def reader(chat_id, *, min_id):
+        calls.append((chat_id, min_id))
+        for item in history:
+            yield item
+
+    async def run():
+        module.set_history_reader(reader)
+        await module.start()
+        first_task = module._recovery_task
+        module.request_claim_recovery()
+        assert module._recovery_task is first_task
+        await first_task
+        module.request_claim_recovery()
+        await module._recovery_task
+        await module.stop()
+
+    asyncio.run(run())
+    packet = next(iter(module.active_packets.values()))
+    assert [claim.sender_id for claim in packet.claims] == ["paid", "offline_one", "offline_two"]
+    assert calls == [("-1001", 100), ("-1001", 100)]
+    assert [item["kwargs"]["reply_to"] for item in client.sent if str(item["text"]).startswith("+")] == [101, 102, 103]
+    restored = make_module(tmp_path)
+    assert len(next(iter(restored.active_packets.values())).claims) == 3
+
+
+def test_send_red_packet_live_and_recovered_claim_do_not_double_pay(tmp_path: Path) -> None:
+    client = FakeClient()
+    module = make_module(tmp_path)
+    asyncio.run(module.handle_message(FakeEvent(FakeMessage(
+        f"{RED_PACKET} 100 1 {PASS}", out=True, sender_id="self", sender_name="Owner", message_id=1,
+    ), client)))
+    message = FakeMessage(PASS, out=False, sender_id="u1", sender_name="User", message_id=101)
+    message.client = client
+
+    async def reader(chat_id, *, min_id):
+        await asyncio.sleep(0)
+        yield message
+
+    async def run():
+        module.set_history_reader(reader)
+        await module.start()
+        await asyncio.gather(module._recovery_task, module.handle_message(FakeEvent(message, client)))
+        await module.stop()
+
+    asyncio.run(run())
+    assert not module.active_packets
+    assert sum(str(item["text"]).startswith("+") for item in client.sent) == 1
+    assert sum("<blockquote expandable>" in str(item["text"]) for item in client.sent) == 1
+
+
+def test_send_red_packet_stop_cancels_recovery_and_disabled_does_not_scan(tmp_path: Path) -> None:
+    client = FakeClient()
+    module = make_module(tmp_path)
+    asyncio.run(module.handle_message(FakeEvent(FakeMessage(
+        f"{RED_PACKET} 100 1 {PASS}", out=True, sender_id="self", sender_name="Owner", message_id=1,
+    ), client)))
+
+    async def run():
+        started = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        async def reader(chat_id, *, min_id):
+            try:
+                started.set()
+                await asyncio.Event().wait()
+                yield None
+            finally:
+                cancelled.set()
+
+        module.set_history_reader(reader)
+        module.card.enabled = False
+        await module.start()
+        assert module._recovery_task is None
+        module.card.enabled = True
+        await module.start()
+        await started.wait()
+        task = module._recovery_task
+        await module.stop()
+        assert task.cancelled()
+        assert cancelled.is_set()
+        assert module._recovery_task is None
+
+    asyncio.run(run())
+    assert len(client.sent) == 1
+
 if __name__ == "__main__":
     import tempfile
 

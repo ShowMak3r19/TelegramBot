@@ -1,5 +1,5 @@
 {
-  "project_name": "TelegramBot",
+  "project_name": "Telebot",
   "version": "0.1.0",
   "admin": {
     "host": "127.0.0.1",
@@ -48,7 +48,8 @@
     "user_profile": false,
     "quote": false,
     "chat_games": false,
-    "magnet_import": false
+    "magnet_import": false,
+    "rex_widget_sync": false
   },
   "red_packet": {
     "templates": [],
@@ -362,10 +363,47 @@
     "update_existing": false,
     "skip_duplicates": true,
     "reply_text": "已自动导入，谢谢老大",
+    "import_command_prefixes": [
+      "/import"
+    ],
     "download_dir": "runtime/tmp/magnet_import",
     "download_retries": 5,
     "import_timeout_seconds": 1800.0,
-    "state_store": "runtime/data/magnet_import_state.json"
+    "state_store": "runtime/data/magnet_import_state.json",
+    "channel_enabled": false,
+    "channel_chat": "",
+    "channel_url_prefix": "",
+    "channel_source_site": "",
+    "channel_forum_id": "",
+    "channel_forum_type": "",
+    "channel_batch_size": 500,
+    "channel_enrich_images": true,
+    "channel_export_enabled": false,
+    "channel_export_chat": "",
+    "channel_export_weekday": 4,
+    "channel_export_time": "12:00",
+    "channel_export_source_site": "",
+    "avdb_enabled": false,
+    "avdb_repo": "",
+    "avdb_asset_pattern": "^.*\\.zip$",
+    "avdb_interval_hours": 4,
+    "avdb_source_site": "",
+    "avdb_converter_script": "scripts/avdb/resource_to_csv.sh"
+  },
+  "rex_widget_sync": {
+    "channel_chat": "",
+    "hub_base_url": "",
+    "hub_password": "",
+    "collection_slug": "",
+    "group_id": "",
+    "file_name_pattern": "\\.js$",
+    "exclude_name_pattern": "[\\(（]\\s*(?:FW|Forward)\\s*[\\)）]",
+    "follow_links": true,
+    "ignore_keys": [],
+    "lock_title": true,
+    "max_file_size_mb": 25,
+    "request_timeout_seconds": 120.0,
+    "state_store": "runtime/data/rex_widget_sync_state.json"
   },
   "ai": {
     "reply_provider": {

@@ -47,11 +47,16 @@ def build_ai_usage_stats(path: Path, range_key: str = "today") -> dict[str, Any]
     features: dict[str, dict[str, Any]] = {}
     series: dict[str, dict[str, Any]] = {}
 
+    effective_start = start_ts
+    if effective_start is None and items:
+        effective_start = min(float(item["ts"]) for item in items)
+    span_years = len({time.localtime(float(item["ts"])).tm_year for item in items}) > 1 if items else False
+
     for item in items:
         success = bool(item.get("success", True))
         model_key = str(item.get("model") or "unknown")
         feature_key = str(item.get("feature") or "unknown")
-        bucket_key = _bucket_key(float(item["ts"]), normalized)
+        bucket_key = _bucket_key(float(item["ts"]), normalized, include_year=span_years or normalized == "all")
         latency = _int(item.get("latency_ms"))
         input_tokens = _int(item.get("input_tokens") or item.get("prompt_tokens"))
         output_tokens = _int(item.get("output_tokens") or item.get("completion_tokens"))
@@ -84,11 +89,11 @@ def build_ai_usage_stats(path: Path, range_key: str = "today") -> dict[str, Any]
         bucket["requests"] += 1
         bucket["total_tokens"] += total_tokens
 
-    _finish_row(summary, now, start_ts)
+    _finish_row(summary, now, effective_start)
     for row in models.values():
-        _finish_row(row, now, start_ts)
+        _finish_row(row, now, effective_start)
     for row in features.values():
-        _finish_row(row, now, start_ts)
+        _finish_row(row, now, effective_start)
 
     return {
         "range": normalized,
@@ -160,8 +165,13 @@ def _range_start(range_key: str, now: float) -> float | None:
     return None
 
 
-def _bucket_key(ts: float, range_key: str) -> str:
-    fmt = "%H:%M" if range_key == "today" else "%m-%d"
+def _bucket_key(ts: float, range_key: str, *, include_year: bool = False) -> str:
+    if range_key == "today":
+        fmt = "%H:%M"
+    elif include_year:
+        fmt = "%Y-%m-%d"
+    else:
+        fmt = "%m-%d"
     return time.strftime(fmt, time.localtime(ts))
 
 

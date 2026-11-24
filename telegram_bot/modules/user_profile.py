@@ -34,6 +34,7 @@ from telegram_bot.shared.contracts import HandlerResult
 from telegram_bot.shared.telegram_io import (
     event_message,
     get_reply_message,
+    is_edited_event,
     is_outgoing,
     message_text,
     safe_edit_message,
@@ -164,6 +165,8 @@ class UserProfileModule:
         self.chat_history = chat_history
         self.telegram_config = telegram_config
         self.usage_path = self._resolve_path("runtime/data/ai_usage.jsonl")
+        self._active_tasks: set[asyncio.Task[Any]] = set()
+        self._active_messages: set[tuple[str, str]] = set()
         self._sync_card_config()
 
     async def start(self) -> None:
@@ -171,15 +174,35 @@ class UserProfileModule:
 
     async def stop(self) -> None:
         self.card.status = "stopped"
+        tasks = list(self._active_tasks)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._active_tasks.clear()
 
     async def handle_message(self, event: Any) -> HandlerResult:
         if not is_outgoing(event):
+            return HandlerResult.ignored(self.card.id)
+        if is_edited_event(event):
             return HandlerResult.ignored(self.card.id)
 
         message = event_message(event)
         command = extract_profile_command(message_text(message), bool(getattr(message, "is_reply", False)), self.config)
         if command is None:
             return HandlerResult.ignored(self.card.id)
+
+        msg_key = (str(getattr(message, "chat_id", "")), str(getattr(message, "id", "")))
+        if msg_key[1] and msg_key in self._active_messages:
+            return HandlerResult.ignored(self.card.id)
+        if msg_key[1]:
+            self._active_messages.add(msg_key)
+        try:
+            return await self._handle_profile_command(event, message, command)
+        finally:
+            self._active_messages.discard(msg_key)
+
+    async def _handle_profile_command(self, event: Any, message: Any, command: ProfileCommand) -> HandlerResult:
 
         chat_id = getattr(message, "chat_id", getattr(event, "chat_id", None))
         client = getattr(event, "client", None)
@@ -213,14 +236,18 @@ class UserProfileModule:
 
         try:
             target, replied = await self._resolve_target(event, command)
-        except ValueError as exc:
+        except Exception as exc:
             await safe_edit_message(message, format_profile_status(str(exc)), parse_mode="html")
             return HandlerResult.handled(self.card.id, "target unresolved")
         if target is None:
             await safe_edit_message(message, format_profile_hint(self.config), parse_mode="html")
             return HandlerResult.handled(self.card.id, "target missing")
 
-        target_id = _entity_id(target) or getattr(replied, "sender_id", None)
+        replied_sender_id = getattr(replied, "sender_id", None) if replied is not None else None
+        if isinstance(replied_sender_id, int) and replied_sender_id < 0:
+            target_id = replied_sender_id
+        else:
+            target_id = _entity_id(target) or replied_sender_id
         if target_id is None:
             await safe_edit_message(message, format_profile_status("无法识别目标群友。"), parse_mode="html")
             return HandlerResult.handled(self.card.id, "target unresolved")
@@ -270,34 +297,45 @@ class UserProfileModule:
             archived_samples: list[ProfileSample] = []
             backfill_complete = True
             completed_backfill_groups = 0
-            if self.chat_history is not None:
-                try:
+            chat_history_enabled = self.chat_history is not None and bool(self.chat_history.config.enabled)
+            if command.all_history and not chat_history_enabled:
+                raise ValueError("聊天数据库未启用，无法执行全量历史分析。")
+            if chat_history_enabled and self.chat_history is not None:
+                store = self.chat_history
+
+                def _query_archive() -> tuple[list[ProfileSample], bool, int]:
                     if history_scope == "all":
-                        archived_samples = collect_archived_profile_samples_across_chats(
-                            self.chat_history,
+                        rows = collect_archived_profile_samples_across_chats(
+                            store,
                             monitored_chats,
                             target_id,
                             self.config.command_prefixes,
                         )
-                        completed_backfill_groups = sum(
+                        completed = sum(
                             bool(state and state.is_complete)
                             for item in monitored_chats
-                            if (state := self.chat_history.get_backfill_state(item.chat_id)) is not None
+                            if (state := store.get_backfill_state(item.chat_id)) is not None
                         )
-                        backfill_complete = bool(monitored_chats) and completed_backfill_groups == len(monitored_chats)
-                    else:
-                        archived_samples = collect_archived_profile_samples(
-                            self.chat_history,
-                            chat_id,
-                            target_id,
-                            None if command.all_history else command.sample_size,
-                            self.config.command_prefixes,
-                            chat_username,
-                        )
+                        return rows, bool(monitored_chats) and completed == len(monitored_chats), completed
+                    rows = collect_archived_profile_samples(
+                        store,
+                        chat_id,
+                        target_id,
+                        None if command.all_history else command.sample_size,
+                        self.config.command_prefixes,
+                        chat_username,
+                    )
+                    complete = True
                     if history_scope == "local":
-                        backfill_state = self.chat_history.get_backfill_state(chat_id)
-                        backfill_complete = bool(backfill_state and backfill_state.is_complete)
-                except Exception:
+                        backfill_state = store.get_backfill_state(chat_id)
+                        complete = bool(backfill_state and backfill_state.is_complete)
+                    return rows, complete, 0
+
+                try:
+                    archived_samples, backfill_complete, completed_backfill_groups = await asyncio.to_thread(_query_archive)
+                except Exception as exc:
+                    if command.all_history:
+                        raise RuntimeError(f"读取本地聊天归档失败：{exc}") from exc
                     logger.exception(
                         "User profile database sample query failed; falling back to Telegram: chat_id=%s target_id=%s",
                         chat_id,
@@ -305,8 +343,6 @@ class UserProfileModule:
                     )
 
             telegram_samples: list[ProfileSample] = []
-            if command.all_history and self.chat_history is None:
-                raise ValueError("聊天数据库未启用，无法执行全量历史分析。")
             if not command.all_history and len(archived_samples) < command.sample_size:
                 telegram_samples = await collect_profile_samples(
                     client,
@@ -393,13 +429,6 @@ class UserProfileModule:
             profile = normalize_profile_result(raw_result, samples)
             if command.all_history and not backfill_complete:
                 profile = add_profile_coverage_warning(profile, history_scope)
-            rendered_html = render_profile_html(
-                profile,
-                target_label=target_label,
-                samples=samples,
-                model=self.ai_config.reply_provider.model,
-                total_tokens=total_tokens,
-            )
             phase = "publish_result"
             rich_published = False
             rich_delivery = ""
@@ -460,6 +489,13 @@ class UserProfileModule:
                 published_message = status_message
                 delivery = rich_delivery
             else:
+                rendered_html = render_profile_html(
+                    profile,
+                    target_label=target_label,
+                    samples=samples,
+                    model=self.ai_config.reply_provider.model,
+                    total_tokens=total_tokens,
+                )
                 published_message = await self._edit_or_send(
                     event,
                     status_message,
@@ -520,6 +556,15 @@ class UserProfileModule:
     async def _resolve_target(self, event: Any, command: ProfileCommand) -> tuple[Any | None, Any | None]:
         message = event_message(event)
         client = getattr(event, "client", None)
+        if command.target_ref and client is not None and hasattr(client, "get_entity"):
+            lookup: Any = command.target_ref.strip()
+            if re.fullmatch(r"-?\d+", lookup):
+                lookup = int(lookup)
+            try:
+                return await client.get_entity(lookup), None
+            except Exception as exc:
+                raise ValueError(f"找不到目标用户 {command.target_ref}") from exc
+
         replied = await get_reply_message(message)
         if replied is not None:
             target = getattr(replied, "sender", None)
@@ -530,17 +575,15 @@ class UserProfileModule:
                     logger.exception("Failed to resolve replied sender for user profile")
             sender_id = getattr(replied, "sender_id", None)
             if target is None and sender_id is not None and client is not None and hasattr(client, "get_entity"):
-                target = await client.get_entity(sender_id)
+                try:
+                    target = await client.get_entity(sender_id)
+                except Exception:
+                    logger.warning("Failed to get_entity for replied sender_id=%s; using fallback", sender_id)
             if target is None and sender_id is not None:
                 target = _FallbackEntity(sender_id)
             return target, replied
 
-        if not command.target_ref or client is None or not hasattr(client, "get_entity"):
-            return None, None
-        try:
-            return await client.get_entity(command.target_ref), None
-        except Exception as exc:
-            raise ValueError(f"找不到目标用户 {command.target_ref}") from exc
+        return None, None
 
     async def _edit_or_send(
         self,
@@ -946,9 +989,17 @@ class UserProfileModule:
         timeout_seconds = max(0.001, float(self.config.timeout_seconds))
         started_at = time.monotonic()
         task = asyncio.create_task(self._generate_profile(prompt))
-        done, _pending = await asyncio.wait({task}, timeout=timeout_seconds)
-        if task in done:
-            return await task
+        self._active_tasks.add(task)
+        try:
+            done, _pending = await asyncio.wait({task}, timeout=timeout_seconds)
+            if task in done:
+                return await task
+        except BaseException:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            raise
+        finally:
+            self._active_tasks.discard(task)
 
         task.cancel()
         try:
@@ -1185,12 +1236,15 @@ def extract_profile_command(text: str, is_reply: bool, config: UserProfileConfig
     stripped = (text or "").strip()
     if not stripped:
         return None
+    matched_prefix = ""
     raw_arguments: str | None = None
     for prefix in sorted((item.strip() for item in config.command_prefixes if item.strip()), key=len, reverse=True):
         if stripped == prefix:
+            matched_prefix = prefix
             raw_arguments = ""
             break
         if stripped.startswith(prefix + " ") or stripped.startswith(prefix + "\n"):
+            matched_prefix = prefix
             raw_arguments = stripped[len(prefix) :].strip()
             break
     if raw_arguments is None:
@@ -1210,6 +1264,10 @@ def extract_profile_command(text: str, is_reply: bool, config: UserProfileConfig
             sample_size = max(config.min_sample_size, min(requested, config.max_sample_size))
             tokens.pop()
     target_ref = tokens[0] if tokens else ""
+    is_symbol_prefix = matched_prefix.startswith(("/", ".", ","))
+    if not is_symbol_prefix and not is_reply:
+        if not target_ref or not (target_ref.startswith("@") or re.fullmatch(r"-?\d+", target_ref)):
+            return None
     return ProfileCommand(
         target_ref=target_ref,
         sample_size=sample_size,
@@ -1831,6 +1889,9 @@ def render_profile_rich_markdown(
             f"| {'⭐' * rating.score} "
             f"| {_escape_rich_markdown(rating.comment or '仅代表当前样本。', table_cell=True)} |"
         )
+    if result.verdict:
+        lines.append("")
+        lines.extend(f"- {_escape_rich_markdown(item)}" for item in result.verdict)
 
     if result.closing:
         lines.extend(["", _escape_rich_markdown(result.closing)])
@@ -1973,6 +2034,8 @@ def build_profile_rich_message(
             ),
         ]
     )
+    for item in result.verdict:
+        detail_blocks.append(rich_types.PageBlockParagraph(text=plain(f"• {item}")))
     if result.closing:
         detail_blocks.append(rich_types.PageBlockParagraph(text=plain(result.closing)))
 
@@ -2003,8 +2066,9 @@ def format_sample_date_range(samples: list[ProfileSample]) -> str:
     dates = sorted(sample.date for sample in samples if sample.date is not None)
     if not dates:
         return "未知"
-    start = dates[0].strftime("%m-%d")
-    end = dates[-1].strftime("%m-%d")
+    fmt = "%Y-%m-%d" if dates[0].year != dates[-1].year else "%m-%d"
+    start = dates[0].strftime(fmt)
+    end = dates[-1].strftime(fmt)
     return start if start == end else f"{start} ~ {end}"
 
 
@@ -2093,7 +2157,11 @@ def _valid_message_ids(value: Any, valid_ids: set[int], limit: int) -> list[int]
 
 def _matches_any_command(text: str, prefixes: list[str]) -> bool:
     stripped = text.strip()
-    return any(stripped == prefix or stripped.startswith(prefix + " ") for prefix in prefixes if prefix)
+    return any(
+        stripped == prefix or stripped.startswith(prefix + " ") or stripped.startswith(prefix + "\n")
+        for prefix in prefixes
+        if prefix
+    )
 
 
 def _entity_id(entity: Any) -> int | None:
