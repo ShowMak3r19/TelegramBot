@@ -694,7 +694,7 @@ function renderDashboardKpis(data) {
   if (sidebarDot) sidebarDot.className = `pulse-dot ${connected ? "online" : "offline"}`;
   if (sidebarState) sidebarState.textContent = connected ? "Telegram 已连接" : "Telegram 未连接";
   if (topbarVersion) {
-    const versionText = project.version ? `v${project.version}` : "v1.1.1";
+    const versionText = project.version ? `v${project.version}` : "v1.1.2";
     topbarVersion.textContent = versionText;
     topbarVersion.title = `${project.name || "Telebot"} ${versionText}`;
   }

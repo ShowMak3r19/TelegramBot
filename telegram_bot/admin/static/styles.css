@@ -6380,17 +6380,17 @@ body.modal-open-body {
   }
 }
 
-/* ---------- Minimal Flat Accent-Adaptive Geometric Badge Icons ---------- */
+/* ---------- Clean Frameless Minimal Flat-Duotone Icons ---------- */
 
 svg.ui-badge-svg {
   fill: none;
   stroke: none;
-  transition: transform 180ms var(--ease-out);
+  transition: transform 180ms var(--ease-out), color 160ms ease;
 }
 
 svg.ui-badge-svg .ico-soft {
   fill: currentColor;
-  fill-opacity: 0.33;
+  fill-opacity: 0.28;
   stroke: none;
 }
 
@@ -6402,345 +6402,273 @@ svg.ui-badge-svg .ico-solid {
 svg.ui-badge-svg .ico-line {
   fill: none;
   stroke: currentColor;
-  stroke-width: 2.05;
+  stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 
-/* Sidebar Navigation Badges */
-.nav-item .nav-ico:has(.ui-badge-svg),
-.sub-nav-item .nav-ico:has(.ui-badge-svg) {
-  width: 1.6rem;
-  height: 1.6rem;
-  border-radius: 0.48rem;
-  background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.14), rgb(var(--accent-rgb) / 0.04));
-  border: 1px solid rgb(var(--accent-rgb) / 0.14);
-  color: var(--ink-secondary);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
-  transition:
-    background 160ms ease,
-    border-color 160ms ease,
-    color 160ms ease,
-    box-shadow 160ms ease;
+/* Strip rounded-rectangle backdrops across all icon slots so icons float cleanly */
+.nav-item .nav-ico,
+.sub-nav-item .nav-ico,
+.sidebar-util-btn .nav-ico,
+.compact-btn .nav-ico.mini-ico,
+.arrange-item-row .nav-ico,
+.arrange-pool-row .nav-ico,
+.cmd-item-left .nav-ico,
+.title-icon,
+.panel-glyph,
+.quick-entry-ico,
+.quick-mod-chip .qm-ico,
+.quick-mod-chip.enabled .qm-ico,
+.module-icon,
+.module-card.is-enabled .module-icon,
+.summary-card-ico,
+.dialog-ico,
+.transfer-item-ico {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
-.nav-item .nav-ico:has(.ui-badge-svg) svg.ui-badge-svg,
-.sub-nav-item .nav-ico:has(.ui-badge-svg) svg.ui-badge-svg {
-  width: 1rem;
-  height: 1rem;
+/* Sidebar Navigation */
+.nav-item .nav-ico,
+.sub-nav-item .nav-ico {
+  width: 1.54rem;
+  height: 1.54rem;
+  color: var(--muted);
+  transition: color 160ms ease;
 }
 
-.nav-item:hover .nav-ico:has(.ui-badge-svg),
-.sub-nav-item:hover .nav-ico:has(.ui-badge-svg) {
-  background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.24), rgb(var(--accent-rgb) / 0.09));
-  border-color: rgb(var(--accent-rgb) / 0.3);
+.nav-item .nav-ico svg.ui-badge-svg,
+.sub-nav-item .nav-ico svg.ui-badge-svg {
+  width: 1.44rem;
+  height: 1.44rem;
+}
+
+.nav-item:hover .nav-ico,
+.sub-nav-item:hover .nav-ico {
+  color: var(--ink);
+}
+
+.nav-item.active .nav-ico,
+.sub-nav-item.active .nav-ico {
   color: var(--accent-ink);
 }
 
-.nav-item.active .nav-ico:has(.ui-badge-svg),
-.sub-nav-item.active .nav-ico:has(.ui-badge-svg) {
-  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
-  border-color: transparent;
-  color: var(--accent-on);
-  box-shadow: 0 4px 12px -4px rgb(var(--accent-rgb) / 0.56), inset 0 1px 0 rgba(255, 255, 255, 0.24);
+.sidebar-util-btn .nav-ico {
+  width: 1.46rem;
+  height: 1.46rem;
+  color: var(--muted);
 }
 
-.nav-item.active .nav-ico svg.ui-badge-svg .ico-soft,
-.sub-nav-item.active .nav-ico svg.ui-badge-svg .ico-soft,
-.module-card.is-enabled .module-icon svg.ui-badge-svg .ico-soft,
-.quick-entry-tile:hover .quick-entry-ico svg.ui-badge-svg .ico-soft,
-.topbar-action-btn.active svg.ui-badge-svg .ico-soft {
-  fill-opacity: 0.38;
+.sidebar-util-btn .nav-ico svg.ui-badge-svg {
+  width: 1.34rem;
+  height: 1.34rem;
 }
 
-/* Sidebar Bottom Utility Badge (Command Palette) */
-.sidebar-util-btn .nav-ico:has(.ui-badge-svg) {
+.sidebar-util-btn:hover .nav-ico {
+  color: var(--ink);
+}
+
+/* Topbar Action Button (Logs matches sibling icon buttons cleanly) */
+.topbar-action-btn .nav-ico svg.ui-badge-svg {
+  width: 1.36rem;
+  height: 1.36rem;
+}
+
+/* Compact Inline Button & Arrange / Command Lists */
+.compact-btn .nav-ico.mini-ico {
+  width: 1.22rem;
+  height: 1.22rem;
+  color: var(--accent-ink);
+}
+
+.compact-btn .nav-ico.mini-ico svg.ui-badge-svg {
+  width: 1.18rem !important;
+  height: 1.18rem !important;
+}
+
+.arrange-item-row .nav-ico,
+.arrange-pool-row .nav-ico,
+.cmd-item-left .nav-ico {
   width: 1.5rem;
   height: 1.5rem;
-  border-radius: 0.44rem;
-  background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.14), rgb(var(--accent-rgb) / 0.04));
-  border: 1px solid rgb(var(--accent-rgb) / 0.14);
-  color: var(--ink-secondary);
-}
-
-.sidebar-util-btn .nav-ico:has(.ui-badge-svg) svg.ui-badge-svg {
-  width: 0.94rem;
-  height: 0.94rem;
-}
-
-.sidebar-util-btn:hover .nav-ico:has(.ui-badge-svg) {
-  background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.24), rgb(var(--accent-rgb) / 0.09));
-  border-color: rgb(var(--accent-rgb) / 0.3);
   color: var(--accent-ink);
 }
 
-/* Topbar Action Badge (Logs) */
-.topbar-action-btn:has(.ui-badge-svg) {
-  background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.16), rgb(var(--accent-rgb) / 0.05));
-  border-color: rgb(var(--accent-rgb) / 0.2);
+.arrange-item-row .nav-ico svg.ui-badge-svg,
+.arrange-pool-row .nav-ico svg.ui-badge-svg,
+.cmd-item-left .nav-ico svg.ui-badge-svg {
+  width: 1.4rem !important;
+  height: 1.4rem !important;
+}
+
+/* View Header Hero Icon */
+.title-icon {
+  width: 2.4rem;
+  height: 2.4rem;
   color: var(--accent-ink);
 }
 
-.topbar-action-btn:has(.ui-badge-svg):hover {
-  background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.26), rgb(var(--accent-rgb) / 0.1));
-  border-color: var(--accent-border);
+.title-icon svg,
+.title-icon svg.ui-badge-svg {
+  width: 2.22rem;
+  height: 2.22rem;
 }
 
-.topbar-action-btn.active:has(.ui-badge-svg) {
-  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
-  border-color: transparent;
-  color: var(--accent-on);
-  box-shadow: 0 4px 12px -4px rgb(var(--accent-rgb) / 0.52), inset 0 1px 0 rgba(255, 255, 255, 0.24);
-}
-
-.topbar-action-btn .nav-ico:has(.ui-badge-svg) svg.ui-badge-svg {
-  width: 1.12rem;
-  height: 1.12rem;
-}
-
-/* Compact Inline Button & Arrange / Command List Badges */
-.compact-btn .nav-ico.mini-ico:has(.ui-badge-svg) {
-  width: 1.25rem;
-  height: 1.25rem;
-  border-radius: 0.36rem;
-  background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.2), rgb(var(--accent-rgb) / 0.07));
+/* Panel Section Glyphs */
+.panel-glyph {
+  width: 1.54rem;
+  height: 1.54rem;
   color: var(--accent-ink);
 }
 
-.compact-btn .nav-ico.mini-ico:has(.ui-badge-svg) svg.ui-badge-svg {
-  width: 0.84rem !important;
-  height: 0.84rem !important;
+.panel-glyph svg,
+.panel-glyph svg.ui-badge-svg {
+  width: 1.42rem;
+  height: 1.42rem;
 }
 
-.arrange-item-row .nav-ico:has(.ui-badge-svg),
-.arrange-pool-row .nav-ico:has(.ui-badge-svg),
-.cmd-item-left .nav-ico:has(.ui-badge-svg) {
-  width: 1.56rem;
-  height: 1.56rem;
-  border-radius: 0.46rem;
-  background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.18), rgb(var(--accent-rgb) / 0.06));
-  border: 1px solid rgb(var(--accent-rgb) / 0.18);
+/* Dashboard Quick Entries (tile itself is already the card) */
+.quick-entry-ico {
+  width: 2.25rem;
+  height: 2.25rem;
   color: var(--accent-ink);
 }
 
-.arrange-item-row .nav-ico:has(.ui-badge-svg) svg.ui-badge-svg,
-.arrange-pool-row .nav-ico:has(.ui-badge-svg) svg.ui-badge-svg,
-.cmd-item-left .nav-ico:has(.ui-badge-svg) svg.ui-badge-svg {
-  width: 0.96rem !important;
-  height: 0.96rem !important;
+.quick-entry-ico svg,
+.quick-entry-ico svg.ui-badge-svg {
+  width: 2.1rem;
+  height: 2.1rem;
 }
 
-/* View Header Hero Badge */
-.title-icon:has(.ui-badge-svg) {
-  width: 2.55rem;
-  height: 2.55rem;
-  border-radius: 0.78rem;
-  background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.26), rgb(var(--accent-rgb) / 0.09));
-  border: 1px solid rgb(var(--accent-rgb) / 0.3);
-  color: var(--accent-ink);
-  box-shadow: 0 6px 16px -8px rgb(var(--accent-rgb) / 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.14);
-}
-
-.title-icon:has(.ui-badge-svg) svg.ui-badge-svg {
-  width: 1.32rem;
-  height: 1.32rem;
-}
-
-/* Panel Glyph Badge */
-.panel-glyph:has(.ui-badge-svg) {
-  width: 1.82rem;
-  height: 1.82rem;
-  border-radius: 0.54rem;
-  background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.22), rgb(var(--accent-rgb) / 0.08));
-  border: 1px solid rgb(var(--accent-rgb) / 0.26);
-  color: var(--accent-ink);
-}
-
-.panel-glyph:has(.ui-badge-svg) svg.ui-badge-svg {
-  width: 1rem;
-  height: 1rem;
-}
-
-/* Dashboard Quick Entry Badges */
-.quick-entry-ico:has(.ui-badge-svg) {
-  width: 2.45rem;
-  height: 2.45rem;
-  border-radius: 0.74rem;
-  background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.22), rgb(var(--accent-rgb) / 0.07));
-  border: 1px solid rgb(var(--accent-rgb) / 0.22);
-  color: var(--accent-ink);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
-  transition:
-    background 180ms ease,
-    border-color 180ms ease,
-    color 180ms ease,
-    box-shadow 180ms ease;
-}
-
-.quick-entry-ico:has(.ui-badge-svg) svg.ui-badge-svg {
-  width: 1.28rem;
-  height: 1.28rem;
-}
-
-.quick-entry-tile:hover .quick-entry-ico:has(.ui-badge-svg) {
-  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
-  border-color: transparent;
-  color: var(--accent-on);
-  box-shadow: 0 6px 16px -5px rgb(var(--accent-rgb) / 0.52), inset 0 1px 0 rgba(255, 255, 255, 0.24);
+.quick-entry-tile:hover .quick-entry-ico {
+  color: var(--accent);
 }
 
 .quick-entry-tile:hover .quick-entry-ico svg.ui-badge-svg {
-  transform: scale(1.06);
+  transform: scale(1.08);
 }
 
 /* Dashboard Quick Module Chips */
-.quick-mod-chip .qm-ico:has(.ui-badge-svg) {
-  width: 2.1rem;
-  height: 2.1rem;
-  border-radius: 0.6rem;
-  background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.09), rgb(var(--accent-rgb) / 0.02));
-  border: 1px solid var(--border);
+.quick-mod-chip .qm-ico {
+  width: 1.78rem;
+  height: 1.78rem;
   color: var(--muted);
-  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
 }
 
-.quick-mod-chip .qm-ico:has(.ui-badge-svg) svg.ui-badge-svg {
-  width: 1.12rem;
-  height: 1.12rem;
+.quick-mod-chip .qm-ico svg,
+.quick-mod-chip .qm-ico svg.ui-badge-svg {
+  width: 1.66rem;
+  height: 1.66rem;
 }
 
-.quick-mod-chip.enabled .qm-ico:has(.ui-badge-svg) {
-  background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.26), rgb(var(--accent-rgb) / 0.1));
-  border-color: rgb(var(--accent-rgb) / 0.3);
+.quick-mod-chip.enabled .qm-ico {
   color: var(--accent-ink);
 }
 
 /* Modules Hub 14 Cards */
-.module-icon:has(.ui-badge-svg) {
-  width: 2.68rem;
-  height: 2.68rem;
-  border-radius: 0.8rem;
-  background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.1), rgb(var(--accent-rgb) / 0.03));
-  border: 1px solid var(--border);
+.module-icon {
+  width: 2.35rem;
+  height: 2.35rem;
   color: var(--muted);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  transition:
-    background 180ms ease,
-    border-color 180ms ease,
-    color 180ms ease,
-    box-shadow 180ms ease;
+  transition: color 180ms ease;
 }
 
-.module-icon:has(.ui-badge-svg) svg.ui-badge-svg {
-  width: 1.38rem;
-  height: 1.38rem;
+.module-icon svg,
+.module-icon svg.ui-badge-svg {
+  width: 2.2rem;
+  height: 2.2rem;
 }
 
-.module-card:hover .module-icon:has(.ui-badge-svg) {
-  border-color: rgb(var(--accent-rgb) / 0.32);
+.module-card:hover .module-icon {
   color: var(--accent-ink);
 }
 
 .module-card:hover .module-icon svg.ui-badge-svg {
-  transform: scale(1.06);
+  transform: scale(1.08);
 }
 
-.module-card.is-enabled .module-icon:has(.ui-badge-svg) {
-  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
-  border-color: transparent;
-  color: var(--accent-on);
-  box-shadow: 0 7px 18px -6px rgb(var(--accent-rgb) / 0.54), inset 0 1px 0 rgba(255, 255, 255, 0.26);
+.module-card.is-enabled .module-icon {
+  color: var(--accent);
 }
 
 /* Summary Cards, Modal Dialogs, Transfer List */
-.summary-card-ico:has(.ui-badge-svg) {
-  width: 2.28rem;
-  height: 2.28rem;
-  border-radius: 0.68rem;
-  background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.22), rgb(var(--accent-rgb) / 0.07));
-  border: 1px solid rgb(var(--accent-rgb) / 0.26);
+.summary-card-ico {
+  width: 2rem;
+  height: 2rem;
   color: var(--accent-ink);
 }
 
-.summary-card-ico:has(.ui-badge-svg) svg.ui-badge-svg {
-  width: 1.2rem;
-  height: 1.2rem;
+.summary-card-ico svg,
+.summary-card-ico svg.ui-badge-svg {
+  width: 1.88rem;
+  height: 1.88rem;
 }
 
-.dialog-ico:has(.ui-badge-svg) {
-  width: 2.4rem;
-  height: 2.4rem;
-  border-radius: 0.72rem;
-  background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.22), rgb(var(--accent-rgb) / 0.08));
-  border: 1px solid rgb(var(--accent-rgb) / 0.28);
+.dialog-ico {
+  width: 2.2rem;
+  height: 2.2rem;
   color: var(--accent-ink);
 }
 
-.dialog-ico:has(.ui-badge-svg) svg.ui-badge-svg {
-  width: 1.24rem;
-  height: 1.24rem;
+.dialog-ico svg,
+.dialog-ico svg.ui-badge-svg {
+  width: 2.05rem;
+  height: 2.05rem;
 }
 
-.transfer-item-ico:has(.ui-badge-svg) {
-  width: 1.82rem;
-  height: 1.82rem;
-  border-radius: 0.52rem;
-  background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.2), rgb(var(--accent-rgb) / 0.06));
-  border: 1px solid rgb(var(--accent-rgb) / 0.2);
+.transfer-item-ico {
+  width: 1.6rem;
+  height: 1.6rem;
   color: var(--accent-ink);
 }
 
-.transfer-item-ico:has(.ui-badge-svg) svg.ui-badge-svg {
-  width: 1.02rem;
-  height: 1.02rem;
+.transfer-item-ico svg,
+.transfer-item-ico svg.ui-badge-svg {
+  width: 1.48rem;
+  height: 1.48rem;
 }
 
 /* Collapsed Desktop Rail */
 @media (min-width: 961px) {
-  [data-sidebar="collapsed"] .nav-item .nav-ico:has(.ui-badge-svg),
-  [data-sidebar="collapsed"] .sidebar-util-btn .nav-ico:has(.ui-badge-svg) {
-    width: 1.8rem;
-    height: 1.8rem;
-    border-radius: 0.54rem;
+  [data-sidebar="collapsed"] .nav-item .nav-ico,
+  [data-sidebar="collapsed"] .sidebar-util-btn .nav-ico {
+    width: 1.72rem;
+    height: 1.72rem;
   }
 
-  [data-sidebar="collapsed"] .nav-item .nav-ico:has(.ui-badge-svg) svg.ui-badge-svg,
-  [data-sidebar="collapsed"] .sidebar-util-btn .nav-ico:has(.ui-badge-svg) svg.ui-badge-svg {
-    width: 1.1rem;
-    height: 1.1rem;
+  [data-sidebar="collapsed"] .nav-item .nav-ico svg.ui-badge-svg,
+  [data-sidebar="collapsed"] .sidebar-util-btn .nav-ico svg.ui-badge-svg {
+    width: 1.6rem;
+    height: 1.6rem;
   }
 }
 
-/* Light Theme Contrast Tuning (keeps glyphs crisp & airy on porcelain glass) */
-[data-theme="light"] .nav-item:hover .nav-ico:has(.ui-badge-svg),
-[data-theme="light"] .sub-nav-item:hover .nav-ico:has(.ui-badge-svg),
-[data-theme="light"] .sidebar-util-btn:hover .nav-ico:has(.ui-badge-svg),
-[data-theme="light"] .topbar-action-btn:has(.ui-badge-svg),
-[data-theme="light"] .compact-btn .nav-ico.mini-ico:has(.ui-badge-svg),
-[data-theme="light"] .arrange-item-row .nav-ico:has(.ui-badge-svg),
-[data-theme="light"] .arrange-pool-row .nav-ico:has(.ui-badge-svg),
-[data-theme="light"] .cmd-item-left .nav-ico:has(.ui-badge-svg),
-[data-theme="light"] .title-icon:has(.ui-badge-svg),
-[data-theme="light"] .panel-glyph:has(.ui-badge-svg),
-[data-theme="light"] .quick-entry-ico:has(.ui-badge-svg),
-[data-theme="light"] .quick-mod-chip.enabled .qm-ico:has(.ui-badge-svg),
-[data-theme="light"] .module-card:hover .module-icon:has(.ui-badge-svg),
-[data-theme="light"] .summary-card-ico:has(.ui-badge-svg),
-[data-theme="light"] .dialog-ico:has(.ui-badge-svg),
-[data-theme="light"] .transfer-item-ico:has(.ui-badge-svg) {
+/* Light Theme Crisp Contrast */
+[data-theme="light"] .nav-item.active .nav-ico,
+[data-theme="light"] .sub-nav-item.active .nav-ico,
+[data-theme="light"] .compact-btn .nav-ico.mini-ico,
+[data-theme="light"] .arrange-item-row .nav-ico,
+[data-theme="light"] .arrange-pool-row .nav-ico,
+[data-theme="light"] .cmd-item-left .nav-ico,
+[data-theme="light"] .title-icon,
+[data-theme="light"] .panel-glyph,
+[data-theme="light"] .quick-entry-ico,
+[data-theme="light"] .quick-mod-chip.enabled .qm-ico,
+[data-theme="light"] .module-card:hover .module-icon,
+[data-theme="light"] .module-card.is-enabled .module-icon,
+[data-theme="light"] .summary-card-ico,
+[data-theme="light"] .dialog-ico,
+[data-theme="light"] .transfer-item-ico {
   color: var(--accent);
 }
 
-[data-theme="light"] .nav-item.active .nav-ico:has(.ui-badge-svg),
-[data-theme="light"] .sub-nav-item.active .nav-ico:has(.ui-badge-svg),
-[data-theme="light"] .topbar-action-btn.active:has(.ui-badge-svg),
-[data-theme="light"] .quick-entry-tile:hover .quick-entry-ico:has(.ui-badge-svg),
-[data-theme="light"] .module-card.is-enabled .module-icon:has(.ui-badge-svg) {
-  color: var(--accent-on);
-}
-
 [data-theme="light"] svg.ui-badge-svg .ico-soft {
-  fill-opacity: 0.28;
+  fill-opacity: 0.24;
 }
 
 @media (prefers-reduced-motion: reduce) {
