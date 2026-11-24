@@ -795,8 +795,8 @@ kbd,
   border: 0;
   background: transparent;
   box-shadow: none;
-  justify-content: center;
-  text-align: center;
+  justify-content: flex-start;
+  text-align: left;
   color: var(--ink);
 }
 
