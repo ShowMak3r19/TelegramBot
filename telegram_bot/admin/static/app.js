@@ -694,7 +694,7 @@ function renderDashboardKpis(data) {
   if (sidebarDot) sidebarDot.className = `pulse-dot ${connected ? "online" : "offline"}`;
   if (sidebarState) sidebarState.textContent = connected ? "Telegram 已连接" : "Telegram 未连接";
   if (topbarVersion) {
-    const versionText = project.version ? `v${project.version}` : "v1.1.3";
+    const versionText = project.version ? `v${project.version}` : "v1.1.4";
     topbarVersion.textContent = versionText;
     topbarVersion.title = `${project.name || "Telebot"} ${versionText}`;
   }
@@ -3701,8 +3701,14 @@ function scheduleStatusLoop() {
 
 /* ---------- Workspace Enhancements: Rail, Density, Command Palette, Dirty Bar, Filters ---------- */
 
+function setMobileNavOpen(open) {
+  const isOpen = Boolean(open);
+  document.body.classList.toggle("mobile-nav-open", isOpen);
+  document.getElementById("mobileNavToggle")?.setAttribute("aria-expanded", String(isOpen));
+}
+
 function closeMobileNav() {
-  document.body.classList.remove("mobile-nav-open");
+  setMobileNavOpen(false);
 }
 
 function applyDensity(density, persist = false) {
@@ -3906,6 +3912,7 @@ function openCommandPalette() {
   const modal = document.getElementById("commandPalette");
   const input = document.getElementById("cmdSearchInput");
   if (!modal || !input) return;
+  closeMobileNav();
   modal.classList.remove("hidden");
   input.value = "";
   cmdSelectedIndex = 0;
@@ -3955,7 +3962,7 @@ function initWorkspaceEnhancements() {
   // Sidebar rail & mobile drawer
   document.getElementById("sidebarToggle")?.addEventListener("click", toggleSidebarRail);
   document.getElementById("mobileNavToggle")?.addEventListener("click", () => {
-    document.body.classList.toggle("mobile-nav-open");
+    setMobileNavOpen(!document.body.classList.contains("mobile-nav-open"));
   });
   document.getElementById("sidebarBackdrop")?.addEventListener("click", closeMobileNav);
 

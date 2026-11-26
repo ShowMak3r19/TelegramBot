@@ -197,6 +197,36 @@ def test_admin_badge_icons_cover_modules_and_menus() -> None:
     assert "ui-badge-svg" in app_js
 
 
+def test_admin_mobile_drawer_stacking_above_backdrop() -> None:
+    admin_static = ROOT / "telegram_bot" / "admin" / "static"
+    styles_css = (admin_static / "styles.css").read_text(encoding="utf-8")
+    app_js = (admin_static / "app.js").read_text(encoding="utf-8")
+
+    # .app-frame 不应设置固定 z-index，避免创建低层级层叠上下文把移动侧栏压在全局遮罩下方
+    app_frame_match = re.search(r"\.app-frame\s*\{(?P<body>[^}]*)\}", styles_css, re.S)
+    assert app_frame_match is not None
+    assert "z-index" not in app_frame_match.group("body")
+
+    backdrop_match = re.search(r"\.sidebar-backdrop\s*\{(?P<body>[^}]*)\}", styles_css, re.S)
+    assert backdrop_match is not None
+    backdrop_z = re.search(r"z-index\s*:\s*(\d+)", backdrop_match.group("body"))
+    assert backdrop_z is not None
+
+    mobile_block_match = re.search(
+        r"@media\s*\(max-width:\s*960px\)\s*\{(?P<body>.*?)\n\}\s*\n\s*@media\s*\(max-width:\s*640px\)",
+        styles_css,
+        re.S,
+    )
+    assert mobile_block_match is not None
+    mobile_sidebar_match = re.search(r"\.sidebar\s*\{(?P<body>[^}]*)\}", mobile_block_match.group("body"), re.S)
+    assert mobile_sidebar_match is not None
+    sidebar_z = re.search(r"z-index\s*:\s*(\d+)", mobile_sidebar_match.group("body"))
+    assert sidebar_z is not None
+    assert int(sidebar_z.group(1)) > int(backdrop_z.group(1))
+    assert "body.mobile-nav-open" in mobile_block_match.group("body")
+    assert "setMobileNavOpen" in app_js
+
+
 def test_admin_sections_are_balanced_and_panels_belong_to_views() -> None:
     from html.parser import HTMLParser
 

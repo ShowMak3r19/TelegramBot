@@ -583,7 +583,6 @@ html:not([data-wallpaper-type]) .wallpaper-layer {
 
 .app-frame {
   position: relative;
-  z-index: 1;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -750,7 +749,12 @@ kbd,
   inset: 0;
   background: rgba(6, 7, 10, 0.56);
   backdrop-filter: blur(6px);
-  z-index: 44;
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 64;
+}
+
+[data-theme="light"] .sidebar-backdrop {
+  background: rgba(28, 18, 17, 0.34);
 }
 
 .app-topbar {
@@ -6275,9 +6279,14 @@ body.modal-open-body {
     bottom: 0.55rem;
     height: auto;
     width: min(18.5rem, 84vw);
+    background-color: var(--surface-modal);
     transform: translateX(-112%);
     box-shadow: var(--shadow-lg);
-    z-index: 50;
+    z-index: 70;
+  }
+
+  body.mobile-nav-open {
+    overflow: hidden;
   }
 
   body.mobile-nav-open .sidebar {
